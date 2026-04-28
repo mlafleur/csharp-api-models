@@ -3,7 +3,7 @@
 
 # Default TypeSpec output
 tsp-output/
-dist/
+#dist/
 
 # Dependency directories
 node_modules/
