@@ -1,4 +1,11 @@
-import { createTypeSpecLibrary, JSONSchemaType } from "@typespec/compiler";
+import { createTypeSpecLibrary, JSONSchemaType, paramMessage } from "@typespec/compiler";
+
+export interface TemplateOverrides {
+  file?: string;
+  class?: string;
+  interface?: string;
+  enum?: string;
+}
 
 export interface EmitterOptions {
   "root-namespace"?: string;
@@ -7,6 +14,7 @@ export interface EmitterOptions {
   "interfaces-output-dir"?: string;
   "additional-usings"?: string[];
   "nullable-properties"?: boolean;
+  templates?: TemplateOverrides;
 }
 
 const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
@@ -28,13 +36,32 @@ const EmitterOptionsSchema: JSONSchemaType<EmitterOptions> = {
       items: { type: "string" },
     },
     "nullable-properties": { type: "boolean", nullable: true },
+    templates: {
+      type: "object",
+      nullable: true,
+      additionalProperties: false,
+      required: [],
+      properties: {
+        file: { type: "string", nullable: true },
+        class: { type: "string", nullable: true },
+        interface: { type: "string", nullable: true },
+        enum: { type: "string", nullable: true },
+      },
+    },
   },
   required: [],
 };
 
 export const $lib = createTypeSpecLibrary({
   name: "@mlafleur/csharp-api-models",
-  diagnostics: {},
+  diagnostics: {
+    "template-load-failed": {
+      severity: "error",
+      messages: {
+        default: paramMessage`Failed to load custom template "${"name"}" from "${"path"}": ${"reason"}`,
+      },
+    },
+  },
   emitter: {
     options: EmitterOptionsSchema,
   },

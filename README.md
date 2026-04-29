@@ -51,6 +51,7 @@ npx tsp compile .
 | `interfaces-output-dir` | `string`                 | `emitter-output-dir` | Override destination for interface files. Absolute, or relative to `emitter-output-dir`.                                                                                                                                                                         |
 | `additional-usings`     | `string[]`               | `[]`                 | Extra `using` directives included in every generated file (deduplicated against built-in and reference-derived usings).                                                                                                                                          |
 | `nullable-properties`   | `boolean`                | `true`               | When `true`, every property is rendered nullable (`string?`, `int?`). Set to `false` to make only `?` (optional) properties and `T \| null` unions nullable.                                                                                                     |
+| `templates`             | `Record<string, string>` | `{}`                 | Per-template path overrides for the built-in Handlebars templates. Supported keys: `file`, `class`, `interface`, `enum`. Relative paths resolve against the current working directory. Templates not overridden fall back to the defaults shipped with this emitter. |
 
 `emitter-output-dir` is the standard TypeSpec compiler option and is supported automatically.
 
@@ -187,6 +188,31 @@ emitter-output-dir/
 ```
 
 Models in namespaces outside the `root-namespace` prefix are placed flat at the output root, while keeping their original C# namespace in the file.
+
+## Custom templates
+
+Each generated artifact is rendered from a Handlebars template that ships with the emitter. Any of the four can be replaced via the `templates` option:
+
+```yaml
+options:
+  "@mlafleur/csharp-api-models":
+    templates:
+      class: ./templates/class.hbs
+      interface: ./templates/interface.hbs
+      enum: ./templates/enum.hbs
+      file: ./templates/file.hbs
+```
+
+A custom template is compiled with `noEscape: true` (so `<`, `>`, `&` pass through unchanged) and receives the view model documented below. The built-in `indent` helper prefixes each non-empty line of its argument with four spaces.
+
+| Template    | View model                                                                                                                                                                                                                                                                                                                                                       |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `file`      | `{ namespace: string, usings: string[], body: string }` — `body` is the already-rendered class / interface / enum block.                                                                                                                                                                                                                                         |
+| `class`     | `{ doc?: string, className: string, interfaceName: string, baseClass?: string, bases: string, properties: Property[], propertiesBlock: string }` — `bases` is `baseClass` and `interfaceName` joined by `, `; `propertiesBlock` is each property pre-rendered and joined by a blank line; iterate `properties` directly for finer-grained control. |
+| `interface` | `{ doc?: string, interfaceName: string, baseInterface?: string, baseClause: string, properties: Property[], propertiesBlock: string }` — `baseClause` is `" : <baseInterface>"` or `""`.                                                                                                                                                                         |
+| `enum`      | `{ enumName: string, members: Member[], membersBlock: string }` — `membersBlock` is each member pre-rendered with trailing commas and joined by newlines.                                                                                                                                                                                                        |
+
+`Property` is `{ doc?: string, type: string, name: string }`; `Member` is `{ name: string, value?: number }`. `doc` (when present) is a fully formatted XML doc-comment block — emit it verbatim above the declaration.
 
 ## Develop
 

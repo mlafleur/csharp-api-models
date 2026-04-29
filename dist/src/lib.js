@@ -1,4 +1,4 @@
-import { createTypeSpecLibrary } from "@typespec/compiler";
+import { createTypeSpecLibrary, paramMessage } from "@typespec/compiler";
 const EmitterOptionsSchema = {
     type: "object",
     additionalProperties: false,
@@ -18,12 +18,31 @@ const EmitterOptionsSchema = {
             items: { type: "string" },
         },
         "nullable-properties": { type: "boolean", nullable: true },
+        templates: {
+            type: "object",
+            nullable: true,
+            additionalProperties: false,
+            required: [],
+            properties: {
+                file: { type: "string", nullable: true },
+                class: { type: "string", nullable: true },
+                interface: { type: "string", nullable: true },
+                enum: { type: "string", nullable: true },
+            },
+        },
     },
     required: [],
 };
 export const $lib = createTypeSpecLibrary({
     name: "@mlafleur/csharp-api-models",
-    diagnostics: {},
+    diagnostics: {
+        "template-load-failed": {
+            severity: "error",
+            messages: {
+                default: paramMessage `Failed to load custom template "${"name"}" from "${"path"}": ${"reason"}`,
+            },
+        },
+    },
     emitter: {
         options: EmitterOptionsSchema,
     },
