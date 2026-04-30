@@ -13,11 +13,15 @@
     "@alloy-js/core": "^0.22.0",
     "@alloy-js/typescript": "^0.22.0",
     "@typespec/compiler": "latest",
-    "@typespec/emitter-framework": "^0.17.0"
+    "@typespec/emitter-framework": "^0.17.0",
+    "@typespec/http": "^1.11.0",
+    "@typespec/versioning": "^0.81.0"
   },
   "devDependencies": {
     "@types/node": "latest",
     "@typespec/compiler": "latest",
+    "@typespec/http": "^1.11.0",
+    "@typespec/versioning": "^0.81.0",
     "eslint": "^9.15.0",
     "prettier": "^3.3.3",
     "typescript": "^5.3.3",

@@ -30,9 +30,16 @@ import {
   createRenderer,
   renderDocComment,
 } from "./renderer.js";
+import { ControllerGroup, ControllerOptions, collectControllers } from "./controllers.js";
 
 const DEFAULT_NAMESPACE = "Models";
 const SYSTEM_USINGS = ["System", "System.Collections.Generic"];
+const CONTROLLER_USINGS = [
+  "System",
+  "System.Collections.Generic",
+  "System.Threading.Tasks",
+  "Microsoft.AspNetCore.Mvc",
+];
 
 const SCALAR_MAP: Record<string, string> = {
   string: "string",
@@ -77,8 +84,12 @@ interface ResolvedOptions {
   namespaceMap: Array<{ key: string; value: string }>;
   modelsOutputDir: string;
   interfacesOutputDir: string;
+  controllersOutputDir: string;
+  servicesOutputDir: string;
+  routePrefix: string;
   additionalUsings: string[];
   nullableProperties: boolean;
+  abstractSuffix: string;
   templates: TemplateOverrides;
 }
 
@@ -93,6 +104,7 @@ export async function $onEmit(context: EmitContext<EmitterOptions>): Promise<voi
   const renderer = buildRenderer(program, options);
   if (!renderer) return;
 
+  // ── Models & enums ──────────────────────────────────────────────────────────
   const models: Model[] = [];
   const enums: Enum[] = [];
 
@@ -141,6 +153,70 @@ export async function $onEmit(context: EmitContext<EmitterOptions>): Promise<voi
       }),
     });
   }
+
+  // ── Controllers & services ──────────────────────────────────────────────────
+  const controllerOptions: ControllerOptions = {
+    routePrefix: options.routePrefix,
+    nullableProperties: options.nullableProperties,
+    abstractSuffix: options.abstractSuffix,
+  };
+
+  const groups = collectControllers(
+    program,
+    controllerOptions,
+    (ns) => csharpNamespaceFor(ns, options),
+    (ns) => folderSegments(options.rootNamespace, ns),
+  );
+
+  for (const group of groups) {
+    await emitControllerGroup(program, group, renderer, options);
+  }
+}
+
+async function emitControllerGroup(
+  program: Program,
+  group: ControllerGroup,
+  renderer: Renderer,
+  options: ResolvedOptions,
+): Promise<void> {
+  const { controllerView, serviceView, namespace, folder } = group;
+  const usings = sortUsings(new Set(CONTROLLER_USINGS));
+
+  await emitFile(program, {
+    path: resolvePath(
+      options.controllersOutputDir,
+      ...folder,
+      `${controllerView.controllerName}.cs`,
+    ),
+    content: renderer.renderFile({
+      namespace,
+      usings,
+      body: renderer.renderController(controllerView),
+    }),
+  });
+
+  await emitFile(program, {
+    path: resolvePath(
+      options.servicesOutputDir,
+      ...folder,
+      `${serviceView.interfaceName}.cs`,
+    ),
+    content: renderer.renderFile({
+      namespace,
+      usings: sortUsings(new Set(["System", "System.Collections.Generic", "System.Threading.Tasks"])),
+      body: renderer.renderServiceInterface(serviceView),
+    }),
+  });
+
+}
+
+function sortUsings(set: Set<string>): string[] {
+  return [...set].sort((a, b) => {
+    const aSystem = a === "System" || a.startsWith("System.");
+    const bSystem = b === "System" || b.startsWith("System.");
+    if (aSystem !== bSystem) return aSystem ? -1 : 1;
+    return a.localeCompare(b);
+  });
 }
 
 function buildRenderer(
@@ -193,19 +269,29 @@ function resolveOptions(context: EmitContext<EmitterOptions>): ResolvedOptions {
     interfacesOutputDir: raw["interfaces-output-dir"]
       ? resolvePath(baseDir, raw["interfaces-output-dir"])
       : baseDir,
+    controllersOutputDir: resolvePath(baseDir, raw["controllers-output-dir"] ?? "Controllers"),
+    servicesOutputDir: resolvePath(baseDir, raw["services-output-dir"] ?? "Services"),
+    routePrefix: raw["route-prefix"] ?? "",
     additionalUsings: raw["additional-usings"] ?? [],
     nullableProperties: raw["nullable-properties"] ?? true,
+    abstractSuffix: raw["abstract-suffix"] ?? "Base",
     templates: resolveTemplatePaths(raw.templates),
   };
 }
 
-function resolveTemplatePaths(
-  templates: EmitterOptions["templates"],
-): TemplateOverrides {
+function resolveTemplatePaths(templates: EmitterOptions["templates"]): TemplateOverrides {
   if (!templates) return {};
   const out: TemplateOverrides = {};
-  for (const name of ["file", "class", "interface", "enum"] as const) {
-    const value = templates[name];
+  const keys: (keyof TemplateOverrides)[] = [
+    "file",
+    "class",
+    "interface",
+    "enum",
+    "controller",
+    "service-interface",
+  ];
+  for (const name of keys) {
+    const value = templates[name as keyof typeof templates];
     if (value) out[name] = resolvePath(process.cwd(), value);
   }
   return out;
@@ -309,12 +395,7 @@ function collectUsings(
       if (ns && ns !== ownNamespace) usings.add(ns);
     }
   }
-  return [...usings].sort((a, b) => {
-    const aSystem = a === "System" || a.startsWith("System.");
-    const bSystem = b === "System" || b.startsWith("System.");
-    if (aSystem !== bSystem) return aSystem ? -1 : 1;
-    return a.localeCompare(b);
-  });
+  return sortUsings(usings);
 }
 
 function buildClassView(

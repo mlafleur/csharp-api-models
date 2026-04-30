@@ -3,7 +3,7 @@ import { expectDiagnosticEmpty } from "@typespec/compiler/testing";
 import { createTester } from "@typespec/compiler/testing";
 
 const baseTester = createTester(resolvePath(import.meta.dirname, "../.."), {
-  libraries: ["@mlafleur/csharp-api-models"],
+  libraries: ["@mlafleur/csharp-api-models", "@typespec/http", "@typespec/versioning"],
 });
 
 export const Tester = baseTester.emit("@mlafleur/csharp-api-models");

@@ -1,0 +1,8 @@
+{{#if doc}}{{doc}}
+{{/if}}{{#each routes}}[Route("{{this}}")]
+{{/each}}[ApiController]
+public abstract class {{controllerName}} : ControllerBase
+{
+
+{{{actionsBlock}}}
+}

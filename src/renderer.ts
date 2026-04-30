@@ -5,9 +5,19 @@ import Handlebars from "handlebars";
 
 const TEMPLATES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../templates");
 
-export type TemplateName = "file" | "class" | "interface" | "enum";
+export type TemplateName =
+  | "file"
+  | "class"
+  | "interface"
+  | "enum"
+  | "controller"
+  | "service-interface";
 
 export type TemplateOverrides = Partial<Record<TemplateName, string>>;
+
+// ---------------------------------------------------------------------------
+// Model view models
+// ---------------------------------------------------------------------------
 
 export interface PropertyView {
   doc?: string;
@@ -46,12 +56,58 @@ export interface FileView {
   body: string;
 }
 
+// ---------------------------------------------------------------------------
+// Controller / service view models
+// ---------------------------------------------------------------------------
+
+export interface OperationParamView {
+  name: string;
+  type: string;
+  binding: "FromRoute" | "FromQuery" | "FromBody" | "FromHeader";
+  optional: boolean;
+}
+
+export interface OperationView {
+  doc?: string;
+  name: string;
+  httpVerb: string;
+  routeSuffix?: string;
+  params: OperationParamView[];
+  returnType: string;
+}
+
+export interface ControllerView {
+  doc?: string;
+  controllerName: string;
+  serviceName: string;
+  serviceInterfaceName: string;
+  routes: string[];
+  operations: OperationView[];
+}
+
+export interface ServiceView {
+  doc?: string;
+  serviceName: string;
+  interfaceName: string;
+  operations: OperationView[];
+}
+
+// ---------------------------------------------------------------------------
+// Renderer interface
+// ---------------------------------------------------------------------------
+
 export interface Renderer {
   renderFile(view: FileView): string;
   renderClass(view: ClassView): string;
   renderInterface(view: InterfaceView): string;
   renderEnum(view: EnumView): string;
+  renderController(view: ControllerView): string;
+  renderServiceInterface(view: ServiceView): string;
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 export function renderDocComment(doc: string): string {
   const lines = doc.split(/\r?\n/);
@@ -84,6 +140,10 @@ function loadTemplate(
   return compileTemplate(env, source);
 }
 
+// ---------------------------------------------------------------------------
+// Per-element text renderers
+// ---------------------------------------------------------------------------
+
 function classPropertyText(prop: PropertyView): string {
   const parts: string[] = [];
   if (prop.doc) parts.push(prop.doc);
@@ -104,12 +164,44 @@ function enumMemberText(member: EnumMemberView, isLast: boolean): string {
   return `${member.name}${value}${trailing}`;
 }
 
+function operationParamDecl(p: OperationParamView): string {
+  return `[${p.binding}] ${p.optional ? `${p.type}?` : p.type} ${p.name}`;
+}
+
+function controllerActionBlock(op: OperationView): string {
+  const lines: string[] = [];
+  if (op.doc) lines.push(...op.doc.split("\n").map((l) => `    ${l}`));
+  const route = op.routeSuffix ? `("${op.routeSuffix}")` : "";
+  lines.push(`    [Http${op.httpVerb}${route}]`);
+  const paramList = op.params.map(operationParamDecl).join(", ");
+  lines.push(`    public abstract Task<IActionResult> ${op.name}(${paramList});`);
+  return lines.join("\n");
+}
+
+function serviceMethodDecl(op: OperationView): string {
+  const lines: string[] = [];
+  if (op.doc) lines.push(...op.doc.split("\n").map((l) => `    ${l}`));
+  const paramList = op.params.map((p) => `${p.optional ? `${p.type}?` : p.type} ${p.name}`).join(", ");
+  lines.push(`    Task<${op.returnType}> ${op.name}(${paramList});`);
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
 export function createRenderer(overrides: TemplateOverrides = {}): Renderer {
   const env = createHandlebarsEnv();
   const fileTemplate = loadTemplate(env, "file", overrides.file);
   const classTemplate = loadTemplate(env, "class", overrides.class);
   const interfaceTemplate = loadTemplate(env, "interface", overrides.interface);
   const enumTemplate = loadTemplate(env, "enum", overrides.enum);
+  const controllerTemplate = loadTemplate(env, "controller", overrides.controller);
+  const serviceInterfaceTemplate = loadTemplate(
+    env,
+    "service-interface",
+    overrides["service-interface"],
+  );
 
   return {
     renderFile(view) {
@@ -136,6 +228,20 @@ export function createRenderer(overrides: TemplateOverrides = {}): Renderer {
         ...view,
         membersBlock: view.members.map((m, i) => enumMemberText(m, i === last)).join("\n"),
       });
+    },
+    renderController(view) {
+      const actionsBlock =
+        view.operations.length > 0
+          ? view.operations.map(controllerActionBlock).join("\n\n") + "\n"
+          : "";
+      return controllerTemplate({ ...view, actionsBlock });
+    },
+    renderServiceInterface(view) {
+      const methodsBlock =
+        view.operations.length > 0
+          ? "\n" + view.operations.map(serviceMethodDecl).join("\n\n")
+          : "";
+      return serviceInterfaceTemplate({ ...view, methodsBlock });
     },
   };
 }

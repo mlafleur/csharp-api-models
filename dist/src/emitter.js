@@ -1,8 +1,15 @@
 import { emitFile, getDoc, getFormat, getNamespaceFullName, isArrayModelType, isRecordModelType, isStdNamespace, isTemplateDeclaration, navigateProgram, NoTarget, resolvePath, } from "@typespec/compiler";
 import { reportDiagnostic } from "./lib.js";
 import { createRenderer, renderDocComment, } from "./renderer.js";
+import { collectControllers } from "./controllers.js";
 const DEFAULT_NAMESPACE = "Models";
 const SYSTEM_USINGS = ["System", "System.Collections.Generic"];
+const CONTROLLER_USINGS = [
+    "System",
+    "System.Collections.Generic",
+    "System.Threading.Tasks",
+    "Microsoft.AspNetCore.Mvc",
+];
 const SCALAR_MAP = {
     string: "string",
     boolean: "bool",
@@ -48,6 +55,7 @@ export async function $onEmit(context) {
     const renderer = buildRenderer(program, options);
     if (!renderer)
         return;
+    // ── Models & enums ──────────────────────────────────────────────────────────
     const models = [];
     const enums = [];
     navigateProgram(program, {
@@ -93,6 +101,45 @@ export async function $onEmit(context) {
             }),
         });
     }
+    // ── Controllers & services ──────────────────────────────────────────────────
+    const controllerOptions = {
+        routePrefix: options.routePrefix,
+        nullableProperties: options.nullableProperties,
+        abstractSuffix: options.abstractSuffix,
+    };
+    const groups = collectControllers(program, controllerOptions, (ns) => csharpNamespaceFor(ns, options), (ns) => folderSegments(options.rootNamespace, ns));
+    for (const group of groups) {
+        await emitControllerGroup(program, group, renderer, options);
+    }
+}
+async function emitControllerGroup(program, group, renderer, options) {
+    const { controllerView, serviceView, namespace, folder } = group;
+    const usings = sortUsings(new Set(CONTROLLER_USINGS));
+    await emitFile(program, {
+        path: resolvePath(options.controllersOutputDir, ...folder, `${controllerView.controllerName}.cs`),
+        content: renderer.renderFile({
+            namespace,
+            usings,
+            body: renderer.renderController(controllerView),
+        }),
+    });
+    await emitFile(program, {
+        path: resolvePath(options.servicesOutputDir, ...folder, `${serviceView.interfaceName}.cs`),
+        content: renderer.renderFile({
+            namespace,
+            usings: sortUsings(new Set(["System", "System.Collections.Generic", "System.Threading.Tasks"])),
+            body: renderer.renderServiceInterface(serviceView),
+        }),
+    });
+}
+function sortUsings(set) {
+    return [...set].sort((a, b) => {
+        const aSystem = a === "System" || a.startsWith("System.");
+        const bSystem = b === "System" || b.startsWith("System.");
+        if (aSystem !== bSystem)
+            return aSystem ? -1 : 1;
+        return a.localeCompare(b);
+    });
 }
 function buildRenderer(program, options) {
     try {
@@ -138,8 +185,12 @@ function resolveOptions(context) {
         interfacesOutputDir: raw["interfaces-output-dir"]
             ? resolvePath(baseDir, raw["interfaces-output-dir"])
             : baseDir,
+        controllersOutputDir: resolvePath(baseDir, raw["controllers-output-dir"] ?? "Controllers"),
+        servicesOutputDir: resolvePath(baseDir, raw["services-output-dir"] ?? "Services"),
+        routePrefix: raw["route-prefix"] ?? "",
         additionalUsings: raw["additional-usings"] ?? [],
         nullableProperties: raw["nullable-properties"] ?? true,
+        abstractSuffix: raw["abstract-suffix"] ?? "Base",
         templates: resolveTemplatePaths(raw.templates),
     };
 }
@@ -147,7 +198,15 @@ function resolveTemplatePaths(templates) {
     if (!templates)
         return {};
     const out = {};
-    for (const name of ["file", "class", "interface", "enum"]) {
+    const keys = [
+        "file",
+        "class",
+        "interface",
+        "enum",
+        "controller",
+        "service-interface",
+    ];
+    for (const name of keys) {
         const value = templates[name];
         if (value)
             out[name] = resolvePath(process.cwd(), value);
@@ -254,13 +313,7 @@ function collectUsings(ownNamespace, references, options) {
                 usings.add(ns);
         }
     }
-    return [...usings].sort((a, b) => {
-        const aSystem = a === "System" || a.startsWith("System.");
-        const bSystem = b === "System" || b.startsWith("System.");
-        if (aSystem !== bSystem)
-            return aSystem ? -1 : 1;
-        return a.localeCompare(b);
-    });
+    return sortUsings(usings);
 }
 function buildClassView(program, model, options) {
     const className = pascalCase(model.name);

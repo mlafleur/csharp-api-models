@@ -812,4 +812,273 @@ namespace {{namespace}}
       ok(failure.message.includes("class"), `diagnostic should name template: ${failure.message}`);
     });
   });
+
+  describe("controller generation", () => {
+    it("emits a controller and service pair for an HTTP interface", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Users" })
+        namespace Demo;
+
+        model User { id: string; name: string; }
+
+        @route("/users")
+        interface Users {
+          @get list(): User[];
+          @get @route("{id}") read(@path id: string): User;
+          @post create(@body user: User): User;
+        }
+      `);
+
+      ok(results["Controllers/UsersController.cs"], "expected Controllers/UsersController.cs");
+      ok(results["Services/IUsersService.cs"], "expected Services/IUsersService.cs");
+      ok(results["Services/UsersService.cs"], "expected Services/UsersService.cs");
+    });
+
+    it("controller contains correct route, ApiController attribute, and ControllerBase", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Items" })
+        namespace Demo;
+
+        model Item { id: string; }
+
+        @route("/items")
+        interface Items {
+          @get list(): Item[];
+        }
+      `);
+
+      const ctrl = results["Controllers/ItemsController.cs"];
+      ok(ctrl.includes("[Route("), `expected [Route] in:\n${ctrl}`);
+      ok(ctrl.includes("/items"), `expected /items path in:\n${ctrl}`);
+      ok(ctrl.includes("[ApiController]"), `expected [ApiController] in:\n${ctrl}`);
+      ok(ctrl.includes("ControllerBase"), `expected ControllerBase in:\n${ctrl}`);
+    });
+
+    it("controller constructor injects the service interface", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Orders" })
+        namespace Demo;
+
+        model Order { id: string; }
+
+        @route("/orders")
+        interface Orders {
+          @get list(): Order[];
+        }
+      `);
+
+      const ctrl = results["Controllers/OrdersController.cs"];
+      ok(ctrl.includes("public abstract class OrdersController"), `expected abstract class in:\n${ctrl}`);
+      ok(ctrl.includes("IOrdersService"), `expected IOrdersService in:\n${ctrl}`);
+      ok(ctrl.includes("private readonly IOrdersService _service"), `expected field in:\n${ctrl}`);
+      ok(ctrl.includes("protected OrdersController(IOrdersService service)"), `expected constructor in:\n${ctrl}`);
+    });
+
+    it("emits action methods with correct HTTP verb attributes", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Things" })
+        namespace Demo;
+
+        model Thing { id: string; }
+
+        @route("/things")
+        interface Things {
+          @get list(): Thing[];
+          @post create(@body thing: Thing): Thing;
+          @get @route("{id}") read(@path id: string): Thing;
+          @put @route("{id}") update(@path id: string, @body thing: Thing): Thing;
+          @delete @route("{id}") remove(@path id: string): void;
+        }
+      `);
+
+      const ctrl = results["Controllers/ThingsController.cs"];
+      ok(ctrl.includes("[HttpGet]"), `expected [HttpGet] in:\n${ctrl}`);
+      ok(ctrl.includes("[HttpPost]"), `expected [HttpPost] in:\n${ctrl}`);
+      ok(ctrl.includes('[HttpGet("{id}")]'), `expected [HttpGet("{id}")] in:\n${ctrl}`);
+      ok(ctrl.includes('[HttpPut("{id}")]'), `expected [HttpPut] in:\n${ctrl}`);
+      ok(ctrl.includes('[HttpDelete("{id}")]'), `expected [HttpDelete] in:\n${ctrl}`);
+    });
+
+    it("emits path and query parameters with correct binding attributes", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Search" })
+        namespace Demo;
+
+        model Result { id: string; }
+
+        @route("/results")
+        interface Results {
+          @get search(@query q: string, @query page?: int32): Result[];
+          @get @route("{id}") read(@path id: string): Result;
+        }
+      `);
+
+      const ctrl = results["Controllers/ResultsController.cs"];
+      ok(ctrl.includes("[FromQuery]"), `expected [FromQuery] in:\n${ctrl}`);
+      ok(ctrl.includes("[FromRoute]"), `expected [FromRoute] in:\n${ctrl}`);
+      ok(ctrl.includes("string q"), `expected q param in:\n${ctrl}`);
+      ok(ctrl.includes("int? page"), `expected optional page param in:\n${ctrl}`);
+      ok(ctrl.includes("string id"), `expected id param in:\n${ctrl}`);
+    });
+
+    it("emits a body parameter with [FromBody]", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Posts" })
+        namespace Demo;
+
+        model Post { title: string; }
+
+        @route("/posts")
+        interface Posts {
+          @post create(@body post: Post): Post;
+        }
+      `);
+
+      const ctrl = results["Controllers/PostsController.cs"];
+      ok(ctrl.includes("[FromBody]"), `expected [FromBody] in:\n${ctrl}`);
+      ok(ctrl.includes("Post body"), `expected body param in:\n${ctrl}`);
+    });
+
+    it("service interface has Task<T> method signatures", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Users" })
+        namespace Demo;
+
+        model User { id: string; }
+
+        @route("/users")
+        interface Users {
+          @get list(): User[];
+          @get @route("{id}") read(@path id: string): User;
+        }
+      `);
+
+      const svc = results["Services/IUsersService.cs"];
+      ok(svc.includes("Task<"), `expected Task<> in:\n${svc}`);
+      ok(svc.includes("List("), `expected List method in:\n${svc}`);
+      ok(svc.includes("Read("), `expected Read method in:\n${svc}`);
+    });
+
+    it("service class implements interface with NotImplementedException stubs", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Users" })
+        namespace Demo;
+
+        model User { id: string; }
+
+        @route("/users")
+        interface Users {
+          @get list(): User[];
+        }
+      `);
+
+      const svc = results["Services/UsersService.cs"];
+      ok(svc.includes("public abstract class UsersService : IUsersService"), `expected abstract class decl in:\n${svc}`);
+      ok(svc.includes("public abstract Task<"), `expected abstract method in:\n${svc}`);
+    });
+
+    it("generates one route per API version when the namespace is versioned", async () => {
+      const results = await emit(`
+        import "@typespec/http";
+        import "@typespec/versioning";
+        using TypeSpec.Http;
+        using TypeSpec.Versioning;
+
+        @service(#{title: "API" })
+        @versioned(Versions)
+        namespace Demo;
+
+        enum Versions { v1, v2 }
+
+        model Widget { id: string; }
+
+        @route("/widgets")
+        interface Widgets {
+          @get list(): Widget[];
+        }
+      `);
+
+      const ctrl = results["Controllers/WidgetsController.cs"];
+      ok(ctrl.includes("[Route("), `expected routes in:\n${ctrl}`);
+      ok(ctrl.includes("v1"), `expected v1 route in:\n${ctrl}`);
+      ok(ctrl.includes("v2"), `expected v2 route in:\n${ctrl}`);
+      // Should have two Route attributes
+      const routeCount = (ctrl.match(/\[Route\(/g) ?? []).length;
+      strictEqual(routeCount, 2, `expected 2 route attributes, got ${routeCount} in:\n${ctrl}`);
+    });
+
+    it("respects route-prefix option", async () => {
+      const results = await emit(
+        `
+          import "@typespec/http";
+          using TypeSpec.Http;
+
+          @service(#{title: "API" })
+          namespace Demo;
+
+          model Item { id: string; }
+
+          @route("/items")
+          interface Items {
+            @get list(): Item[];
+          }
+        `,
+        { "route-prefix": "api" },
+      );
+
+      const ctrl = results["Controllers/ItemsController.cs"];
+      ok(ctrl.includes("api/items"), `expected api/items route in:\n${ctrl}`);
+    });
+
+    it("routes controllers and services to separate dirs when configured", async () => {
+      const results = await emit(
+        `
+          import "@typespec/http";
+          using TypeSpec.Http;
+
+          @service(#{title: "Demo" })
+          namespace Demo;
+
+          model Task { id: string; }
+
+          @route("/tasks")
+          interface Tasks {
+            @get list(): Task[];
+          }
+        `,
+        {
+          "controllers-output-dir": "Controllers",
+          "services-output-dir": "Services",
+        },
+      );
+
+      ok(results["Controllers/TasksController.cs"], `expected Controllers/TasksController.cs, got ${Object.keys(results).join(", ")}`);
+      ok(results["Services/ITasksService.cs"], "expected Services/ITasksService.cs");
+      ok(results["Services/TasksService.cs"], "expected Services/TasksService.cs");
+    });
+  });
 });

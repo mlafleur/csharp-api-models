@@ -3,14 +3,20 @@ export interface TemplateOverrides {
     class?: string;
     interface?: string;
     enum?: string;
+    controller?: string;
+    "service-interface"?: string;
 }
 export interface EmitterOptions {
     "root-namespace"?: string;
     "namespace-map"?: Record<string, string>;
     "models-output-dir"?: string;
     "interfaces-output-dir"?: string;
+    "controllers-output-dir"?: string;
+    "services-output-dir"?: string;
+    "route-prefix"?: string;
     "additional-usings"?: string[];
     "nullable-properties"?: boolean;
+    "abstract-suffix"?: string;
     templates?: TemplateOverrides;
 }
 export declare const $lib: import("@typespec/compiler").TypeSpecLibrary<{
