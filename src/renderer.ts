@@ -182,7 +182,7 @@ function serviceMethodDecl(op: OperationView): string {
   const lines: string[] = [];
   if (op.doc) lines.push(...op.doc.split("\n").map((l) => `    ${l}`));
   const paramList = op.params.map((p) => `${p.optional ? `${p.type}?` : p.type} ${p.name}`).join(", ");
-  lines.push(`    Task<${op.returnType}> ${op.name}(${paramList});`);
+  lines.push(`    Task<${op.returnType}?> ${op.name}Async(${paramList});`);
   return lines.join("\n");
 }
 
