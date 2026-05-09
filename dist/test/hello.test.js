@@ -18,13 +18,16 @@ describe("csharp emitter", () => {
         model Person { name: string; age: int32; }
         model Address { city: string; }
       `);
-            ok(results["Person.cs"], "expected Person.cs at root");
-            ok(results["Address.cs"], "expected Address.cs at root");
-            ok(!Object.keys(results).some((k) => k.includes("/")), "no subdirectories expected");
+            ok(results["Person.g.cs"], "expected Person.cs at root");
+            ok(results["Address.g.cs"], "expected Address.cs at root");
+            // Helpers are always emitted to a Helpers/ subdir — exclude them from the
+            // flat-layout check, which only concerns model and interface files.
+            const nonHelperKeys = Object.keys(results).filter((k) => !k.startsWith("Helpers/"));
+            ok(!nonHelperKeys.some((k) => k.includes("/")), "no subdirectories expected for model files");
         });
         it("uses default namespace for top-level models", async () => {
             const results = await emit(`model Loose { x: int32; }`);
-            const file = results["Loose.cs"];
+            const file = results["Loose.g.cs"];
             ok(file, "expected Loose.cs at root");
             ok(file.includes("namespace Models"));
         });
@@ -33,7 +36,7 @@ describe("csharp emitter", () => {
         namespace App.Users;
         model User { id: string; }
       `);
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file, "expected User.cs at root");
             ok(file.includes("namespace App.Users"));
         });
@@ -44,7 +47,7 @@ describe("csharp emitter", () => {
           namespace App.Users;
           model User { id: string; }
         `, { "root-namespace": "App" });
-            const file = results["Users/User.cs"];
+            const file = results["Users/User.g.cs"];
             ok(file, `expected Users/User.cs, got ${Object.keys(results).join(", ")}`);
             ok(file.includes("namespace App.Users"));
         });
@@ -53,7 +56,7 @@ describe("csharp emitter", () => {
           namespace App;
           model Root { id: string; }
         `, { "root-namespace": "App" });
-            const file = results["Root.cs"];
+            const file = results["Root.g.cs"];
             ok(file, "expected Root.cs at output root");
             ok(file.includes("namespace App"));
         });
@@ -61,8 +64,8 @@ describe("csharp emitter", () => {
             const results = await emit(`model Free { id: string; }`, {
                 "root-namespace": "App",
             });
-            const file = results["Free.cs"];
-            ok(file, "expected Free.cs");
+            const file = results["Free.g.cs"];
+            ok(file, "expected Free.g.cs");
             ok(file.includes("namespace App"));
         });
         it("places models outside the root namespace at the output root, keeping their namespace", async () => {
@@ -70,7 +73,7 @@ describe("csharp emitter", () => {
           namespace Other.Stuff;
           model Foreign { id: string; }
         `, { "root-namespace": "App" });
-            const file = results["Foreign.cs"];
+            const file = results["Foreign.g.cs"];
             ok(file, "expected Foreign.cs at root");
             ok(file.includes("namespace Other.Stuff"));
         });
@@ -79,7 +82,7 @@ describe("csharp emitter", () => {
           namespace App.Api.V1.Users;
           model User { id: string; }
         `, { "root-namespace": "App.Api" });
-            const file = results["V1/Users/User.cs"];
+            const file = results["V1/Users/User.g.cs"];
             ok(file, `expected V1/Users/User.cs, got ${Object.keys(results).join(", ")}`);
             ok(file.includes("namespace App.Api.V1.Users"));
         });
@@ -90,42 +93,42 @@ describe("csharp emitter", () => {
         namespace Demo;
         model M { @format("uuid") id: string; }
       `);
-            ok(results["M.cs"].includes("public Guid? Id { get; set; }"));
+            ok(results["M.g.cs"].includes("public Guid? Id { get; set; }"));
         });
         it("maps guid (alias) to Guid", async () => {
             const results = await emit(`
         namespace Demo;
         model M { @format("guid") id: string; }
       `);
-            ok(results["M.cs"].includes("public Guid? Id { get; set; }"));
+            ok(results["M.g.cs"].includes("public Guid? Id { get; set; }"));
         });
         it("maps uri to Uri", async () => {
             const results = await emit(`
         namespace Demo;
         model M { @format("uri") link: string; }
       `);
-            ok(results["M.cs"].includes("public Uri? Link { get; set; }"));
+            ok(results["M.g.cs"].includes("public Uri? Link { get; set; }"));
         });
         it("maps date-time format to DateTimeOffset", async () => {
             const results = await emit(`
         namespace Demo;
         model M { @format("date-time") at: string; }
       `);
-            ok(results["M.cs"].includes("public DateTimeOffset? At { get; set; }"));
+            ok(results["M.g.cs"].includes("public DateTimeOffset? At { get; set; }"));
         });
         it("preserves nullable on optional formatted properties", async () => {
             const results = await emit(`
         namespace Demo;
         model M { @format("uuid") id?: string; }
       `);
-            ok(results["M.cs"].includes("public Guid? Id { get; set; }"));
+            ok(results["M.g.cs"].includes("public Guid? Id { get; set; }"));
         });
         it("falls back to the underlying type when the format is unknown", async () => {
             const results = await emit(`
         namespace Demo;
         model M { @format("unknown-thing") name: string; }
       `);
-            ok(results["M.cs"].includes("public string? Name { get; set; }"));
+            ok(results["M.g.cs"].includes("public string? Name { get; set; }"));
         });
     });
     describe("type mapping", () => {
@@ -134,7 +137,7 @@ describe("csharp emitter", () => {
         namespace Demo;
         model Person { name: string; age: int32; active: boolean; }
       `);
-            const file = results["Person.cs"];
+            const file = results["Person.g.cs"];
             ok(file.includes("public partial class Person"));
             ok(file.includes("public string? Name { get; set; }"));
             ok(file.includes("public int? Age { get; set; }"));
@@ -145,7 +148,7 @@ describe("csharp emitter", () => {
         namespace Demo;
         model Thing { id: string; nickname?: string; count?: int32; }
       `);
-            const file = results["Thing.cs"];
+            const file = results["Thing.g.cs"];
             ok(file.includes("public string? Id { get; set; }"));
             ok(file.includes("public string? Nickname { get; set; }"));
             ok(file.includes("public int? Count { get; set; }"));
@@ -155,7 +158,7 @@ describe("csharp emitter", () => {
         namespace Demo;
         model Bag { tags: string[]; scores: Record<int32>; }
       `);
-            const file = results["Bag.cs"];
+            const file = results["Bag.g.cs"];
             ok(file.includes("public IList<string>? Tags { get; set; }"));
             ok(file.includes("public IDictionary<string, int>? Scores { get; set; }"));
         });
@@ -164,7 +167,7 @@ describe("csharp emitter", () => {
         namespace Demo;
         enum Color { Red: 1, Green: 2, Blue: 3 }
       `);
-            const file = results["Color.cs"];
+            const file = results["Color.g.cs"];
             ok(file.includes("public enum Color"));
             ok(file.includes("Red = 1"));
             ok(file.includes("Green = 2"));
@@ -176,8 +179,8 @@ describe("csharp emitter", () => {
         model Animal { name: string; }
         model Dog extends Animal { breed: string; }
       `);
-            const animal = results["Animal.cs"];
-            const dog = results["Dog.cs"];
+            const animal = results["Animal.g.cs"];
+            const dog = results["Dog.g.cs"];
             ok(animal.includes("public partial class Animal"));
             ok(dog.includes("public partial class Dog : Animal"));
         });
@@ -186,7 +189,7 @@ describe("csharp emitter", () => {
         namespace Demo;
         model M { value: string | null; }
       `);
-            ok(results["M.cs"].includes("public string? Value { get; set; }"));
+            ok(results["M.g.cs"].includes("public string? Value { get; set; }"));
         });
         it("maps date and duration scalars", async () => {
             const results = await emit(`
@@ -198,7 +201,7 @@ describe("csharp emitter", () => {
           dur: duration;
         }
       `);
-            const file = results["M.cs"];
+            const file = results["M.g.cs"];
             ok(file.includes("public DateTimeOffset? When { get; set; }"));
             ok(file.includes("public DateOnly? Date { get; set; }"));
             ok(file.includes("public TimeOnly? Time { get; set; }"));
@@ -213,7 +216,7 @@ describe("csharp emitter", () => {
           id: string;
         }
       `);
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file.includes("/// <summary>"));
             ok(file.includes("/// A user of the system"));
             ok(file.includes("/// Unique id"));
@@ -223,10 +226,14 @@ describe("csharp emitter", () => {
         namespace Demo;
         model X { v: string; }
       `);
-            const files = Object.keys(results).sort();
-            strictEqual(files.length, 2);
-            strictEqual(files[0], "IX.cs");
-            strictEqual(files[1], "X.cs");
+            // Helpers (Helpers/*.g.cs) are always emitted — filter them out and verify
+            // only the model class and interface are produced.
+            const modelFiles = Object.keys(results)
+                .filter((k) => !k.startsWith("Helpers/"))
+                .sort();
+            strictEqual(modelFiles.length, 2);
+            strictEqual(modelFiles[0], "IX.g.cs");
+            strictEqual(modelFiles[1], "X.g.cs");
         });
     });
     describe("using statements", () => {
@@ -236,7 +243,7 @@ describe("csharp emitter", () => {
         model A { id: string; }
         model B { ref: A; }
       `);
-            const file = results["B.cs"];
+            const file = results["B.g.cs"];
             ok(!file.includes("using Demo;"), `unexpected self-using in:\n${file}`);
             ok(file.includes("public A? Ref { get; set; }"));
         });
@@ -245,7 +252,7 @@ describe("csharp emitter", () => {
         namespace App.Common { model Address { city: string; } }
         namespace App.Users { model User { home: App.Common.Address; } }
       `);
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file.includes("namespace App.Users"));
             ok(file.includes("using App.Common;"), `expected using App.Common; in:\n${file}`);
             ok(file.includes("public Address? Home { get; set; }"));
@@ -260,7 +267,7 @@ describe("csharp emitter", () => {
           }
         }
       `);
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file.includes("using App.Common;"));
             ok(file.includes("public IList<Tag>? Tags { get; set; }"));
             ok(file.includes("public IDictionary<string, Tag>? ScoresByTag { get; set; }"));
@@ -270,7 +277,7 @@ describe("csharp emitter", () => {
         namespace App.Base { model Entity { id: string; } }
         namespace App.Users { model User extends App.Base.Entity { name: string; } }
       `);
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file.includes("using App.Base;"));
             ok(file.includes("public partial class User : Entity"));
         });
@@ -281,7 +288,7 @@ describe("csharp emitter", () => {
           namespace Foo.Bar;
           model Widget { id: string; }
         `, { "namespace-map": { "Foo.Bar": "Acme.Things" } });
-            const file = results["Widget.cs"];
+            const file = results["Widget.g.cs"];
             ok(file, `expected Widget.cs, got ${Object.keys(results).join(", ")}`);
             ok(file.includes("namespace Acme.Things"), `wrong namespace in:\n${file}`);
         });
@@ -290,7 +297,7 @@ describe("csharp emitter", () => {
           namespace Foo.Bar.Sub;
           model Widget { id: string; }
         `, { "namespace-map": { "Foo.Bar": "Acme.Things" } });
-            const file = results["Widget.cs"];
+            const file = results["Widget.g.cs"];
             ok(file.includes("namespace Acme.Things.Sub"), `wrong namespace in:\n${file}`);
         });
         it("uses the longest matching key when multiple mappings could apply", async () => {
@@ -303,7 +310,7 @@ describe("csharp emitter", () => {
                     "Foo.Bar": "Acme.Things",
                 },
             });
-            const file = results["Widget.cs"];
+            const file = results["Widget.g.cs"];
             ok(file.includes("namespace Acme.Things.Sub"));
         });
         it("emits using statements that reflect the mapped namespace of referenced types", async () => {
@@ -311,7 +318,7 @@ describe("csharp emitter", () => {
           namespace Legacy.Common { model Address { city: string; } }
           namespace App.Users { model User { home: Legacy.Common.Address; } }
         `, { "namespace-map": { "Legacy.Common": "Acme.Common" } });
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file.includes("namespace App.Users"));
             ok(file.includes("using Acme.Common;"), `expected mapped using Acme.Common; in:\n${file}`);
             ok(!file.includes("using Legacy.Common;"));
@@ -325,7 +332,7 @@ describe("csharp emitter", () => {
                 "root-namespace": "Acme",
                 "namespace-map": { "Legacy.Common": "Acme.Common" },
             });
-            const file = results["Common/Address.cs"];
+            const file = results["Common/Address.g.cs"];
             ok(file, `expected Common/Address.cs, got ${Object.keys(results).join(", ")}`);
             ok(file.includes("namespace Acme.Common"));
         });
@@ -334,7 +341,7 @@ describe("csharp emitter", () => {
           namespace Legacy.Common { model Address { city: string; } }
           namespace App.Users { model User { home: Legacy.Common.Address; } }
         `, { "namespace-map": { "Legacy.Common": "App.Users" } });
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(!file.includes("using App.Users;"), `unexpected self-using in:\n${file}`);
             ok(file.includes("public Address? Home { get; set; }"));
         });
@@ -345,10 +352,10 @@ describe("csharp emitter", () => {
         namespace Demo;
         model User { id: string; name: string; }
       `);
-            const cls = results["User.cs"];
-            const iface = results["IUser.cs"];
-            ok(cls, "expected User.cs");
-            ok(iface, "expected IUser.cs");
+            const cls = results["User.g.cs"];
+            const iface = results["IUser.g.cs"];
+            ok(cls, "expected User.g.cs");
+            ok(iface, "expected IUser.g.cs");
             ok(cls.includes("public partial class User : IUser"));
             ok(cls.includes("public string? Id { get; set; }"));
             ok(iface.includes("public partial interface IUser"));
@@ -362,8 +369,8 @@ describe("csharp emitter", () => {
         model Animal { name: string; }
         model Dog extends Animal { breed: string; }
       `);
-            const dogClass = results["Dog.cs"];
-            const dogIface = results["IDog.cs"];
+            const dogClass = results["Dog.g.cs"];
+            const dogIface = results["IDog.g.cs"];
             ok(dogClass.includes("public partial class Dog : Animal, IDog"));
             ok(dogIface.includes("public partial interface IDog : IAnimal"));
             ok(dogIface.includes("string? Breed { get; set; }"));
@@ -373,15 +380,15 @@ describe("csharp emitter", () => {
         namespace Demo;
         enum Color { Red, Green, Blue }
       `);
-            ok(results["Color.cs"]);
-            ok(!results["IColor.cs"], "enums should not have interfaces");
+            ok(results["Color.g.cs"]);
+            ok(!results["IColor.g.cs"], "enums should not have interfaces");
         });
         it("preserves nullable formatting on interface members", async () => {
             const results = await emit(`
         namespace Demo;
         model M { @format("uuid") id?: string; nick?: string; }
       `);
-            const iface = results["IM.cs"];
+            const iface = results["IM.g.cs"];
             ok(iface.includes("Guid? Id { get; set; }"));
             ok(iface.includes("string? Nick { get; set; }"));
         });
@@ -392,18 +399,18 @@ describe("csharp emitter", () => {
           namespace Demo;
           model User { id: string; }
         `, { "models-output-dir": "models" });
-            ok(results["models/User.cs"], `expected models/User.cs, got ${Object.keys(results).join(", ")}`);
-            ok(results["IUser.cs"], "interface should still be at default emitter-output-dir");
-            ok(!results["User.cs"], "class should not be at default location when override is set");
+            ok(results["models/User.g.cs"], `expected models/User.cs, got ${Object.keys(results).join(", ")}`);
+            ok(results["IUser.g.cs"], "interface should still be at default emitter-output-dir");
+            ok(!results["User.g.cs"], "class should not be at default location when override is set");
         });
         it("routes interface files into interfaces-output-dir", async () => {
             const results = await emit(`
           namespace Demo;
           model User { id: string; }
         `, { "interfaces-output-dir": "interfaces" });
-            ok(results["User.cs"], "class should still be at default emitter-output-dir");
-            ok(results["interfaces/IUser.cs"]);
-            ok(!results["IUser.cs"], "interface should not be at default location when override is set");
+            ok(results["User.g.cs"], "class should still be at default emitter-output-dir");
+            ok(results["interfaces/IUser.g.cs"]);
+            ok(!results["IUser.g.cs"], "interface should not be at default location when override is set");
         });
         it("routes both when both overrides are provided", async () => {
             const results = await emit(`
@@ -413,10 +420,10 @@ describe("csharp emitter", () => {
                 "models-output-dir": "src/models",
                 "interfaces-output-dir": "src/interfaces",
             });
-            ok(results["src/models/User.cs"]);
-            ok(results["src/interfaces/IUser.cs"]);
+            ok(results["src/models/User.g.cs"]);
+            ok(results["src/interfaces/IUser.g.cs"]);
         });
-        it("respects root-namespace folder layout under each override dir", async () => {
+        it("appends output-dir segments to TypeSpec namespace when namespace-from-path is enabled (default)", async () => {
             const results = await emit(`
           namespace App.Users;
           model User { id: string; }
@@ -425,16 +432,33 @@ describe("csharp emitter", () => {
                 "models-output-dir": "models",
                 "interfaces-output-dir": "interfaces",
             });
-            ok(results["models/Users/User.cs"]);
-            ok(results["interfaces/Users/IUser.cs"]);
+            // Files are flat under each output dir; the dir segment is appended to
+            // the TypeSpec namespace.
+            ok(results["models/User.g.cs"], `expected flat models/User.g.cs, got ${Object.keys(results).join(", ")}`);
+            ok(results["interfaces/IUser.g.cs"], "expected flat interfaces/IUser.g.cs");
+            ok(results["models/User.g.cs"].includes("namespace App.Users.Models"));
+            ok(results["interfaces/IUser.g.cs"].includes("namespace App.Users.Interfaces"));
+        });
+        it("uses subfolder layout (not dir-suffix) when namespace-from-path is disabled", async () => {
+            const results = await emit(`
+          namespace App.Users;
+          model User { id: string; }
+        `, {
+                "root-namespace": "App",
+                "models-output-dir": "models",
+                "interfaces-output-dir": "interfaces",
+                "namespace-from-path": false,
+            });
+            ok(results["models/Users/User.g.cs"], `expected models/Users/User.g.cs, got ${Object.keys(results).join(", ")}`);
+            ok(results["interfaces/Users/IUser.g.cs"]);
         });
         it("routes enums to models-output-dir", async () => {
             const results = await emit(`
           namespace Demo;
           enum Color { Red, Green }
         `, { "models-output-dir": "models" });
-            ok(results["models/Color.cs"]);
-            ok(!results["Color.cs"]);
+            ok(results["models/Color.g.cs"]);
+            ok(!results["Color.g.cs"]);
         });
     });
     describe("additional-usings option", () => {
@@ -444,7 +468,7 @@ describe("csharp emitter", () => {
           model User { id: string; }
           enum Color { Red, Green }
         `, { "additional-usings": ["System.Text.Json", "Newtonsoft.Json"] });
-            for (const key of ["User.cs", "IUser.cs", "Color.cs"]) {
+            for (const key of ["User.g.cs", "IUser.g.cs", "Color.g.cs"]) {
                 const file = results[key];
                 ok(file, `expected ${key}`);
                 ok(file.includes("using System.Text.Json;"), `missing System.Text.Json in ${key}`);
@@ -456,7 +480,7 @@ describe("csharp emitter", () => {
           namespace Demo;
           model User { id: string; }
         `, { "additional-usings": ["Newtonsoft.Json", "System.Text.Json"] });
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             const sysIdx = file.indexOf("using System;");
             const sysJsonIdx = file.indexOf("using System.Text.Json;");
             const newtonIdx = file.indexOf("using Newtonsoft.Json;");
@@ -469,7 +493,7 @@ describe("csharp emitter", () => {
           namespace App.Common { model Address { city: string; } }
           namespace App.Users { model User { home: App.Common.Address; } }
         `, { "additional-usings": ["App.Common"] });
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             const occurrences = file.split("using App.Common;").length - 1;
             strictEqual(occurrences, 1, `expected exactly one 'using App.Common;' in:\n${file}`);
         });
@@ -484,11 +508,11 @@ describe("csharp emitter", () => {
           tags: string[];
         }
       `);
-            const cls = results["M.cs"];
+            const cls = results["M.g.cs"];
             ok(cls.includes("public string? Name { get; set; }"));
             ok(cls.includes("public int? Age { get; set; }"));
             ok(cls.includes("public IList<string>? Tags { get; set; }"));
-            const iface = results["IM.cs"];
+            const iface = results["IM.g.cs"];
             ok(iface.includes("string? Name { get; set; }"));
             ok(iface.includes("int? Age { get; set; }"));
             ok(iface.includes("IList<string>? Tags { get; set; }"));
@@ -503,12 +527,12 @@ describe("csharp emitter", () => {
             score?: int32;
           }
         `, { "nullable-properties": false });
-            const cls = results["M.cs"];
+            const cls = results["M.g.cs"];
             ok(cls.includes("public string Id { get; set; }"));
             ok(cls.includes("public string? Nickname { get; set; }"));
             ok(cls.includes("public int Count { get; set; }"));
             ok(cls.includes("public int? Score { get; set; }"));
-            const iface = results["IM.cs"];
+            const iface = results["IM.g.cs"];
             ok(iface.includes("string Id { get; set; }"));
             ok(iface.includes("string? Nickname { get; set; }"));
             ok(iface.includes("int Count { get; set; }"));
@@ -519,7 +543,7 @@ describe("csharp emitter", () => {
           namespace Demo;
           model M { value: string | null; required: string; }
         `, { "nullable-properties": false });
-            const cls = results["M.cs"];
+            const cls = results["M.g.cs"];
             ok(cls.includes("public string? Value { get; set; }"));
             ok(cls.includes("public string Required { get; set; }"));
         });
@@ -528,9 +552,67 @@ describe("csharp emitter", () => {
         namespace Demo;
         model M { value: string | null; }
       `);
-            const cls = results["M.cs"];
+            const cls = results["M.g.cs"];
             ok(cls.includes("public string? Value { get; set; }"));
             ok(!cls.includes("string??"));
+        });
+    });
+    describe("JSON serialization attributes", () => {
+        it("adds [JsonPropertyName] with camelCase key to every class property", async () => {
+            const results = await emit(`
+        namespace Demo;
+        model M { firstName: string; userId: string; }
+      `);
+            const cls = results["M.g.cs"];
+            ok(cls.includes('[JsonPropertyName("firstName")]'), `missing firstName attr in:\n${cls}`);
+            ok(cls.includes('[JsonPropertyName("userId")]'), `missing userId attr in:\n${cls}`);
+        });
+        it("converts snake_case property names to camelCase JSON keys", async () => {
+            const results = await emit(`
+        namespace Demo;
+        model M { first_name: string; user_id: string; }
+      `);
+            const cls = results["M.g.cs"];
+            ok(cls.includes('[JsonPropertyName("firstName")]'), `missing firstName attr in:\n${cls}`);
+            ok(cls.includes('[JsonPropertyName("userId")]'), `missing userId attr in:\n${cls}`);
+        });
+        it("adds [JsonIgnore] to nullable properties but not non-nullable", async () => {
+            const results = await emit(`
+          namespace Demo;
+          model M { required: string; optional?: string; }
+        `, { "nullable-properties": false });
+            const cls = results["M.g.cs"];
+            ok(cls.includes('[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]'), `missing JsonIgnore in:\n${cls}`);
+            // Count occurrences: only the nullable optional property should have it
+            const count = (cls.match(/\[JsonIgnore\(/g) ?? []).length;
+            strictEqual(count, 1, `expected 1 JsonIgnore, got ${count} in:\n${cls}`);
+        });
+        it("adds [JsonPropertyName] and [JsonIgnore] to interface properties", async () => {
+            const results = await emit(`
+        namespace Demo;
+        model M { name: string; }
+      `);
+            const iface = results["IM.g.cs"];
+            ok(iface.includes('[JsonPropertyName("name")]'), `missing JsonPropertyName in:\n${iface}`);
+            ok(iface.includes('[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]'), `missing JsonIgnore in:\n${iface}`);
+        });
+        it("adds [JsonConverter(typeof(EnumMemberConverterFactory))] to enums", async () => {
+            const results = await emit(`
+        namespace Demo;
+        enum Color { Red, Green, Blue }
+      `);
+            const file = results["Color.g.cs"];
+            ok(file.includes("[JsonConverter(typeof(EnumMemberConverterFactory))]"), `missing converter in:\n${file}`);
+        });
+        it("includes using System.Text.Json.Serialization in model files", async () => {
+            const results = await emit(`
+        namespace Demo;
+        model M { id: string; }
+        enum Status { Active, Inactive }
+      `);
+            ok(results["M.g.cs"].includes("using System.Text.Json.Serialization;"));
+            ok(results["IM.g.cs"].includes("using System.Text.Json.Serialization;"));
+            ok(results["Status.g.cs"].includes("using System.Text.Json.Serialization;"));
         });
     });
     describe("templates option", () => {
@@ -545,12 +627,12 @@ public partial class {{className}} : {{bases}}
           namespace Demo;
           model User { id: string; name: string; }
         `, { templates: { class: tpl } });
-            const cls = results["User.cs"];
+            const cls = results["User.g.cs"];
             ok(cls.includes("[Serializable]"), `expected [Serializable] in:\n${cls}`);
             ok(cls.includes("public partial class User : IUser"));
             ok(cls.includes("public string? Id { get; set; }"));
             ok(cls.includes("public string? Name { get; set; }"));
-            ok(results["IUser.cs"].includes("public partial interface IUser"));
+            ok(results["IUser.g.cs"].includes("public partial interface IUser"));
         });
         it("uses a custom interface template when provided", async () => {
             const tpl = writeTemplate("interface", `public partial interface {{interfaceName}}{{baseClause}}
@@ -562,7 +644,7 @@ public partial class {{className}} : {{bases}}
           namespace Demo;
           model User { id: string; }
         `, { templates: { interface: tpl } });
-            const iface = results["IUser.cs"];
+            const iface = results["IUser.g.cs"];
             ok(iface.includes("public partial interface IUser"));
             ok(iface.includes("string? Id { get; }"), `expected get-only prop in:\n${iface}`);
             ok(!iface.includes("set;"), `interface should not contain setters in:\n${iface}`);
@@ -578,7 +660,7 @@ public enum {{enumName}}
           namespace Demo;
           enum Color { Red: 1, Green: 2, Blue: 3 }
         `, { templates: { enum: tpl } });
-            const file = results["Color.cs"];
+            const file = results["Color.g.cs"];
             ok(file.includes("[Flags]"), `expected [Flags] in:\n${file}`);
             ok(file.includes("Red = 1,"));
             ok(file.includes("Blue = 3,"));
@@ -593,7 +675,7 @@ namespace {{namespace}}
           namespace Demo;
           model User { id: string; }
         `, { templates: { file: tpl } });
-            const file = results["User.cs"];
+            const file = results["User.g.cs"];
             ok(file.startsWith("// CUSTOM HEADER"), `expected custom header in:\n${file}`);
             ok(!file.includes("// <auto-generated/>"));
             ok(file.includes("namespace Demo"));
@@ -608,8 +690,8 @@ namespace {{namespace}}
           namespace Demo;
           model User { id: string; }
         `, { templates: { class: tpl } });
-            ok(results["User.cs"].includes("public sealed class User"));
-            ok(results["IUser.cs"].includes("public partial interface IUser"));
+            ok(results["User.g.cs"].includes("public sealed class User"));
+            ok(results["IUser.g.cs"].includes("public partial interface IUser"));
         });
         it("reports a diagnostic when a custom template cannot be loaded", async () => {
             const [, diagnostics] = await emitWithDiagnostics(`
@@ -622,7 +704,7 @@ namespace {{namespace}}
         });
     });
     describe("controller generation", () => {
-        it("emits a controller and service pair for an HTTP interface", async () => {
+        it("emits a controller and service interface pair for an HTTP interface", async () => {
             const results = await emit(`
         import "@typespec/http";
         using TypeSpec.Http;
@@ -639,11 +721,10 @@ namespace {{namespace}}
           @post create(@body user: User): User;
         }
       `);
-            ok(results["Controllers/UsersController.cs"], "expected Controllers/UsersController.cs");
-            ok(results["Services/IUsersService.cs"], "expected Services/IUsersService.cs");
-            ok(results["Services/UsersService.cs"], "expected Services/UsersService.cs");
+            ok(results["Controllers/UsersControllerBase.g.cs"], "expected Controllers/UsersControllerBase.g.cs");
+            ok(results["Services/IUsersService.g.cs"], "expected Services/IUsersService.g.cs");
         });
-        it("controller contains correct route, ApiController attribute, and ControllerBase", async () => {
+        it("controller has ApiController and ControllerBase; route is on each method", async () => {
             const results = await emit(`
         import "@typespec/http";
         using TypeSpec.Http;
@@ -658,13 +739,14 @@ namespace {{namespace}}
           @get list(): Item[];
         }
       `);
-            const ctrl = results["Controllers/ItemsController.cs"];
-            ok(ctrl.includes("[Route("), `expected [Route] in:\n${ctrl}`);
-            ok(ctrl.includes("/items"), `expected /items path in:\n${ctrl}`);
+            const ctrl = results["Controllers/ItemsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(!ctrl.includes("[Route("), `class-level [Route] should not be present:\n${ctrl}`);
+            ok(ctrl.includes('[HttpGet("/api/items")]'), `expected method-level route in:\n${ctrl}`);
             ok(ctrl.includes("[ApiController]"), `expected [ApiController] in:\n${ctrl}`);
             ok(ctrl.includes("ControllerBase"), `expected ControllerBase in:\n${ctrl}`);
         });
-        it("controller constructor injects the service interface", async () => {
+        it("controller is abstract and the service interface file is emitted", async () => {
             const results = await emit(`
         import "@typespec/http";
         using TypeSpec.Http;
@@ -679,11 +761,12 @@ namespace {{namespace}}
           @get list(): Order[];
         }
       `);
-            const ctrl = results["Controllers/OrdersController.cs"];
-            ok(ctrl.includes("public abstract class OrdersController"), `expected abstract class in:\n${ctrl}`);
-            ok(ctrl.includes("IOrdersService"), `expected IOrdersService in:\n${ctrl}`);
-            ok(ctrl.includes("private readonly IOrdersService _service"), `expected field in:\n${ctrl}`);
-            ok(ctrl.includes("protected OrdersController(IOrdersService service)"), `expected constructor in:\n${ctrl}`);
+            const ctrl = results["Controllers/OrdersControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(ctrl.includes("public abstract class OrdersControllerBase"), `expected abstract class in:\n${ctrl}`);
+            const svc = results["Services/IOrdersService.g.cs"];
+            ok(svc, `expected Services/IOrdersService.g.cs`);
+            ok(svc.includes("public interface IOrdersService"), `expected interface decl in:\n${svc}`);
         });
         it("emits action methods with correct HTTP verb attributes", async () => {
             const results = await emit(`
@@ -704,12 +787,13 @@ namespace {{namespace}}
           @delete @route("{id}") remove(@path id: string): void;
         }
       `);
-            const ctrl = results["Controllers/ThingsController.cs"];
-            ok(ctrl.includes("[HttpGet]"), `expected [HttpGet] in:\n${ctrl}`);
-            ok(ctrl.includes("[HttpPost]"), `expected [HttpPost] in:\n${ctrl}`);
-            ok(ctrl.includes('[HttpGet("{id}")]'), `expected [HttpGet("{id}")] in:\n${ctrl}`);
-            ok(ctrl.includes('[HttpPut("{id}")]'), `expected [HttpPut] in:\n${ctrl}`);
-            ok(ctrl.includes('[HttpDelete("{id}")]'), `expected [HttpDelete] in:\n${ctrl}`);
+            const ctrl = results["Controllers/ThingsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(ctrl.includes('[HttpGet("/api/things")]'), `expected root HttpGet in:\n${ctrl}`);
+            ok(ctrl.includes('[HttpPost("/api/things")]'), `expected HttpPost in:\n${ctrl}`);
+            ok(ctrl.includes('[HttpGet("/api/things/{id}")]'), `expected HttpGet with id in:\n${ctrl}`);
+            ok(ctrl.includes('[HttpPut("/api/things/{id}")]'), `expected HttpPut in:\n${ctrl}`);
+            ok(ctrl.includes('[HttpDelete("/api/things/{id}")]'), `expected HttpDelete in:\n${ctrl}`);
         });
         it("emits path and query parameters with correct binding attributes", async () => {
             const results = await emit(`
@@ -727,7 +811,8 @@ namespace {{namespace}}
           @get @route("{id}") read(@path id: string): Result;
         }
       `);
-            const ctrl = results["Controllers/ResultsController.cs"];
+            const ctrl = results["Controllers/ResultsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
             ok(ctrl.includes("[FromQuery]"), `expected [FromQuery] in:\n${ctrl}`);
             ok(ctrl.includes("[FromRoute]"), `expected [FromRoute] in:\n${ctrl}`);
             ok(ctrl.includes("string q"), `expected q param in:\n${ctrl}`);
@@ -749,7 +834,8 @@ namespace {{namespace}}
           @post create(@body post: Post): Post;
         }
       `);
-            const ctrl = results["Controllers/PostsController.cs"];
+            const ctrl = results["Controllers/PostsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
             ok(ctrl.includes("[FromBody]"), `expected [FromBody] in:\n${ctrl}`);
             ok(ctrl.includes("Post body"), `expected body param in:\n${ctrl}`);
         });
@@ -769,12 +855,13 @@ namespace {{namespace}}
           @get @route("{id}") read(@path id: string): User;
         }
       `);
-            const svc = results["Services/IUsersService.cs"];
+            const svc = results["Services/IUsersService.g.cs"];
+            ok(svc, `expected Services/IUsersService.g.cs, got ${Object.keys(results).join(", ")}`);
             ok(svc.includes("Task<"), `expected Task<> in:\n${svc}`);
-            ok(svc.includes("List("), `expected List method in:\n${svc}`);
-            ok(svc.includes("Read("), `expected Read method in:\n${svc}`);
+            ok(svc.includes("ListAsync("), `expected ListAsync method in:\n${svc}`);
+            ok(svc.includes("ReadAsync("), `expected ReadAsync method in:\n${svc}`);
         });
-        it("service class implements interface with NotImplementedException stubs", async () => {
+        it("service interface declares abstract Task methods", async () => {
             const results = await emit(`
         import "@typespec/http";
         using TypeSpec.Http;
@@ -789,11 +876,12 @@ namespace {{namespace}}
           @get list(): User[];
         }
       `);
-            const svc = results["Services/UsersService.cs"];
-            ok(svc.includes("public abstract class UsersService : IUsersService"), `expected abstract class decl in:\n${svc}`);
-            ok(svc.includes("public abstract Task<"), `expected abstract method in:\n${svc}`);
+            const svc = results["Services/IUsersService.g.cs"];
+            ok(svc, `expected Services/IUsersService.g.cs`);
+            ok(svc.includes("public interface IUsersService"), `expected interface decl in:\n${svc}`);
+            ok(svc.includes("Task<"), `expected Task<> signature in:\n${svc}`);
         });
-        it("generates one route per API version when the namespace is versioned", async () => {
+        it("generates one route attribute per API version on each method", async () => {
             const results = await emit(`
         import "@typespec/http";
         import "@typespec/versioning";
@@ -813,13 +901,14 @@ namespace {{namespace}}
           @get list(): Widget[];
         }
       `);
-            const ctrl = results["Controllers/WidgetsController.cs"];
-            ok(ctrl.includes("[Route("), `expected routes in:\n${ctrl}`);
+            const ctrl = results["Controllers/WidgetsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(!ctrl.includes("[Route("), `class-level [Route] should not be present:\n${ctrl}`);
             ok(ctrl.includes("v1"), `expected v1 route in:\n${ctrl}`);
             ok(ctrl.includes("v2"), `expected v2 route in:\n${ctrl}`);
-            // Should have two Route attributes
-            const routeCount = (ctrl.match(/\[Route\(/g) ?? []).length;
-            strictEqual(routeCount, 2, `expected 2 route attributes, got ${routeCount} in:\n${ctrl}`);
+            // list() has one [HttpGet] per version
+            const verbCount = (ctrl.match(/\[HttpGet\(/g) ?? []).length;
+            strictEqual(verbCount, 2, `expected 2 [HttpGet] attributes, got ${verbCount} in:\n${ctrl}`);
         });
         it("respects route-prefix option", async () => {
             const results = await emit(`
@@ -835,9 +924,10 @@ namespace {{namespace}}
           interface Items {
             @get list(): Item[];
           }
-        `, { "route-prefix": "api" });
-            const ctrl = results["Controllers/ItemsController.cs"];
-            ok(ctrl.includes("api/items"), `expected api/items route in:\n${ctrl}`);
+        `, { "route-prefix": "v2/api" });
+            const ctrl = results["Controllers/ItemsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(ctrl.includes("v2/api/items"), `expected v2/api/items route in:\n${ctrl}`);
         });
         it("routes controllers and services to separate dirs when configured", async () => {
             const results = await emit(`
@@ -857,9 +947,69 @@ namespace {{namespace}}
                 "controllers-output-dir": "Controllers",
                 "services-output-dir": "Services",
             });
-            ok(results["Controllers/TasksController.cs"], `expected Controllers/TasksController.cs, got ${Object.keys(results).join(", ")}`);
-            ok(results["Services/ITasksService.cs"], "expected Services/ITasksService.cs");
-            ok(results["Services/TasksService.cs"], "expected Services/TasksService.cs");
+            ok(results["Controllers/TasksControllerBase.g.cs"], `expected Controllers/TasksControllerBase.g.cs, got ${Object.keys(results).join(", ")}`);
+            ok(results["Services/ITasksService.g.cs"], "expected Services/ITasksService.g.cs");
+        });
+        it("infers controller namespace from the TypeSpec namespace when root-namespace is not set", async () => {
+            const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Items" })
+        namespace Demo;
+
+        model Item { id: string; }
+
+        @route("/items")
+        interface Items {
+          @get list(): Item[];
+        }
+      `);
+            const ctrl = results["Controllers/ItemsControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(ctrl.includes("namespace Demo.Controllers"), `expected 'namespace Demo.Controllers' in:\n${ctrl}`);
+            const svc = results["Services/IItemsService.g.cs"];
+            ok(svc, "expected service file");
+            ok(svc.includes("namespace Demo.Services"), `expected 'namespace Demo.Services' in:\n${svc}`);
+        });
+        it("infers a multi-segment controller namespace when the TypeSpec namespace is multi-segment", async () => {
+            const results = await emit(`
+        import "@typespec/http";
+        using TypeSpec.Http;
+
+        @service(#{title: "Orders" })
+        namespace My.Company.Orders;
+
+        model Order { id: string; }
+
+        @route("/orders")
+        interface Orders {
+          @get list(): Order[];
+        }
+      `);
+            const ctrl = results["Controllers/OrdersControllerBase.g.cs"];
+            ok(ctrl, `expected controller file, got ${Object.keys(results).join(", ")}`);
+            ok(ctrl.includes("namespace My.Company.Orders.Controllers"), `expected 'namespace My.Company.Orders.Controllers' in:\n${ctrl}`);
+        });
+    });
+    describe("helpers generation", () => {
+        it("infers helper namespace from the TypeSpec namespace when root-namespace is not set", async () => {
+            const results = await emit(`
+        namespace Demo;
+        model M { x: int32; }
+      `);
+            const helper = results["Helpers/MergePatchValue.g.cs"];
+            ok(helper, `expected Helpers/MergePatchValue.g.cs, got ${Object.keys(results).join(", ")}`);
+            ok(helper.includes("namespace Demo.Helpers"), `expected 'namespace Demo.Helpers' in:\n${helper}`);
+        });
+        it("uses explicit root-namespace for helpers when provided", async () => {
+            const results = await emit(`
+        namespace Demo;
+        model M { x: int32; }
+      `, { "root-namespace": "MyApp" });
+            const helper = results["Helpers/MergePatchValue.g.cs"];
+            ok(helper, `expected Helpers/MergePatchValue.g.cs`);
+            ok(helper.includes("namespace MyApp.Helpers"), `expected 'namespace MyApp.Helpers' in:\n${helper}`);
         });
     });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@mlafleur/csharp-api-models",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "dist/src/index.js",
   "exports": {
@@ -28,6 +28,7 @@
     "typescript-eslint": "^8.49.0"
   },
   "scripts": {
+    "prepare": "tsc && tsc -p tsconfig.test.json && node scripts/copy-templates.mjs",
     "build": "tsc && tsc -p tsconfig.test.json && node scripts/copy-templates.mjs",
     "watch": "tsc --watch",
     "test": "cd dist && node --test",

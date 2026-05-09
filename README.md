@@ -1,13 +1,15 @@
 # @mlafleur/csharp-api-models
 
-A TypeSpec emitter that generates C# model classes and matching interfaces from TypeSpec definitions.
+A TypeSpec emitter that generates C# model classes, interfaces, enums, ASP.NET Core controllers, and service stubs from TypeSpec definitions.
 
-For each TypeSpec `model`, the emitter produces:
+For each TypeSpec `model` the emitter produces:
 
-- A `public partial class <Name>` that implements its interface
-- A `public partial interface I<Name>` with the same properties
+- A `public partial class <Name>` that implements its companion interface.
+- A `public partial interface I<Name>` with the same property signatures.
 
-TypeSpec `enum` declarations emit as C# `enum`. Standard-library types are skipped.
+TypeSpec `enum` declarations become C# enums with `[JsonConverter(typeof(EnumMemberConverterFactory))]` and optional `[EnumMember(Value = "...")]` attributes. When HTTP operations are present the emitter also generates controllers and services (see [Controllers and services](#controllers-and-services)).
+
+---
 
 ## Install
 
@@ -15,9 +17,9 @@ TypeSpec `enum` declarations emit as C# `enum`. Standard-library types are skipp
 npm install --save-dev @mlafleur/csharp-api-models
 ```
 
-## Configure
+## Quick start
 
-Add the emitter to your `tspconfig.yaml`:
+Add the emitter to `tspconfig.yaml` and run the compiler:
 
 ```yaml
 emit:
@@ -26,188 +28,201 @@ emit:
 options:
   "@mlafleur/csharp-api-models":
     root-namespace: MyCompany.Api
-    nullable-properties: true
-    models-output-dir: "{cwd}/src/Models"
-    interfaces-output-dir: "{cwd}/src/Interfaces"
-    controllers-output-dir: "{cwd}/src/Controllers"
-    services-output-dir: "{cwd}/src/Services"
-    route-prefix: api
-    additional-usings:
-      - System.Text.Json.Serialization
-    namespace-map:
-      Legacy.Common: MyCompany.Api.Common
 ```
-
-Then run the compiler:
 
 ```bash
 npx tsp compile .
 ```
 
-## Options
-
-| Option                  | Type                     | Default              | Purpose                                                                                                                                                                                                                                                          |
-| ----------------------- | ------------------------ | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `root-namespace`        | `string`                 | _(unset)_            | C# namespace prefix that is **stripped** from folder paths so the directory tree mirrors the namespace tree below the root. When unset, files are written flat at the output dir; the C# `namespace` declaration still reflects the original TypeSpec namespace. |
-| `namespace-map`         | `Record<string, string>` | `{}`                 | Rewrites TypeSpec namespaces into different C# namespaces. Longest-prefix match wins; sub-namespaces inherit the rewrite.                                                                                                                                        |
-| `models-output-dir`     | `string`                 | `emitter-output-dir` | Override destination for class and enum files. Absolute, or relative to `emitter-output-dir`.                                                                                                                                                                    |
-| `interfaces-output-dir` | `string`                 | `emitter-output-dir` | Override destination for interface files. Absolute, or relative to `emitter-output-dir`.                                                                                                                                                                         |
-| `additional-usings`     | `string[]`               | `[]`                 | Extra `using` directives included in every generated file (deduplicated against built-in and reference-derived usings).                                                                                                                                          |
-| `nullable-properties`      | `boolean`                | `true`               | When `true`, every property is rendered nullable (`string?`, `int?`). Set to `false` to make only `?` (optional) properties and `T \| null` unions nullable.                                                                                                     |
-| `controllers-output-dir`   | `string`                 | `emitter-output-dir` | Destination for generated controller files.                                                                                                                                                                                                                       |
-| `services-output-dir`      | `string`                 | `emitter-output-dir` | Destination for generated service interface and class files.                                                                                                                                                                                                      |
-| `route-prefix`             | `string`                 | `""`                 | Prefix prepended to every controller route. Set to `api` to produce `/api/v1/users`-style paths.                                                                                                                                                                  |
-| `templates`                | `Record<string, string>` | `{}`                 | Per-template path overrides. Keys: `file`, `class`, `interface`, `enum`, `controller`, `service-class`, `service-interface`. Paths are relative to CWD.                                                                                                          |
-
-`emitter-output-dir` is the standard TypeSpec compiler option and is supported automatically.
-
-## Type mapping
-
-| TypeSpec                                 | C#                                   |
-| ---------------------------------------- | ------------------------------------ |
-| `string`                                 | `string`                             |
-| `boolean`                                | `bool`                               |
-| `bytes`                                  | `byte[]`                             |
-| `int8` / `int16` / `int32` / `int64`     | `sbyte` / `short` / `int` / `long`   |
-| `uint8` / `uint16` / `uint32` / `uint64` | `byte` / `ushort` / `uint` / `ulong` |
-| `safeint`, `integer`                     | `long`                               |
-| `float`, `float64`, `numeric`            | `double`                             |
-| `float32`                                | `float`                              |
-| `decimal`, `decimal128`                  | `decimal`                            |
-| `plainDate`                              | `DateOnly`                           |
-| `plainTime`                              | `TimeOnly`                           |
-| `utcDateTime`, `offsetDateTime`          | `DateTimeOffset`                     |
-| `duration`                               | `TimeSpan`                           |
-| `url`                                    | `Uri`                                |
-| `T[]`                                    | `IList<T>`                           |
-| `Record<T>`                              | `IDictionary<string, T>`             |
-| `T \| null`                              | `T?`                                 |
-| Other unions, tuples                     | `object`                             |
-
-Custom scalars walk up to their nearest known base. Unmapped scalars fall back to `object`.
-
-## `@format` overrides
-
-When a property (or its scalar type) carries `@format(...)`, the format wins over the underlying type:
-
-| `@format` value | C#               |
-| --------------- | ---------------- |
-| `uuid`, `guid`  | `Guid`           |
-| `uri`, `url`    | `Uri`            |
-| `date-time`     | `DateTimeOffset` |
-| `date`          | `DateOnly`       |
-| `time`          | `TimeOnly`       |
-
-Unknown formats fall through to the underlying type.
-
-## Example
-
-Input:
+With `root-namespace: MyCompany.Api` and the TypeSpec below, the emitter writes `Users/User.g.cs` and `Users/IUser.g.cs`:
 
 ```typespec
-@doc("A user record")
+@doc("A registered user")
 namespace MyCompany.Api.Users;
 
 model User {
-  @format("uuid")
-  id: string;
-
+  @format("uuid") id: string;
   name: string;
   active: boolean;
   joined?: utcDateTime;
 }
 ```
 
-With `root-namespace: MyCompany.Api`, the emitter writes:
+```csharp
+// Users/User.g.cs
+// <auto-generated/>
+#nullable enable
 
-- `Users/User.cs`
+using System;
+using System.Collections.Generic;
 
-  ```csharp
-  // <auto-generated/>
-  #nullable enable
+namespace MyCompany.Api.Users
+{
+    /// <summary>
+    /// A registered user
+    /// </summary>
+    public partial class User : IUser
+    {
+        public Guid? Id { get; set; }
+        public string? Name { get; set; }
+        public bool? Active { get; set; }
+        public DateTimeOffset? Joined { get; set; }
+    }
+}
+```
 
-  using System;
-  using System.Collections.Generic;
+---
 
-  namespace MyCompany.Api.Users
-  {
-      /// <summary>
-      /// A user record
-      /// </summary>
-      public partial class User : IUser
-      {
-          public Guid? Id { get; set; }
+## Options
 
-          public string? Name { get; set; }
+| Option                   | Type                     | Default              | Description |
+| ------------------------ | ------------------------ | -------------------- | ----------- |
+| `root-namespace`         | `string`                 | _(inferred)_         | Root C# namespace. Stripped from folder paths so the directory tree mirrors the namespace hierarchy beneath it. When omitted, inferred from the TypeSpec namespace tree. |
+| `namespace-map`          | `Record<string, string>` | `{}`                 | Rewrites TypeSpec namespaces to C# namespaces. Longest-prefix match wins; sub-namespaces inherit the rewrite automatically. |
+| `namespace-from-path`    | `boolean`                | `true`               | When `true`, output-dir path segments are appended to the TypeSpec namespace for models/interfaces/enums, and are used as the namespace for controllers/services/helpers. See [Namespace resolution](#namespace-resolution). |
+| `file-extension`         | `string`                 | `".g.cs"`            | File extension for all generated files. |
+| `models-output-dir`      | `string`                 | `emitter-output-dir` | Destination for generated class and enum files. Relative paths resolve against `emitter-output-dir`. |
+| `interfaces-output-dir`  | `string`                 | `emitter-output-dir` | Destination for generated interface files. |
+| `controllers-output-dir` | `string`                 | `"Controllers"`      | Destination for generated controller files. |
+| `services-output-dir`    | `string`                 | `"Services"`         | Destination for generated service interface and class files. |
+| `helpers-output-dir`     | `string`                 | `"Helpers"`          | Destination for generated helper files (`EnumMemberConverterFactory`, `MergePatchValue`). |
+| `route-prefix`           | `string`                 | `"api"`              | Prefix prepended to every controller route, e.g. `"api"` → `/api/v1/users`. |
+| `abstract-suffix`        | `string`                 | `"Base"`             | Suffix appended to generated abstract controller class names, e.g. `UsersControllerBase`. |
+| `nullable-properties`    | `boolean`                | `true`               | When `true`, all properties are emitted as nullable (`string?`, `int?`). When `false`, only TypeSpec-optional properties and `T \| null` unions are nullable. |
+| `additional-usings`      | `string[]`               | `[]`                 | Extra `using` directives added to every generated file. |
+| `templates`              | `Record<string, string>` | `{}`                 | Custom Handlebars template paths keyed by template name. See [Custom templates](#custom-templates). |
 
-          public bool? Active { get; set; }
+---
 
-          public DateTimeOffset? Joined { get; set; }
-      }
-  }
-  ```
+## Namespace resolution
 
-- `Users/IUser.cs`
+The emitter uses different strategies for models/interfaces/enums versus controllers/services/helpers.
 
-  ```csharp
-  // <auto-generated/>
-  #nullable enable
+### Models, interfaces, and enums
 
-  using System;
-  using System.Collections.Generic;
+The C# namespace is always derived from the TypeSpec namespace (after applying `namespace-map`).
 
-  namespace MyCompany.Api.Users
-  {
-      /// <summary>
-      /// A user record
-      /// </summary>
-      public partial interface IUser
-      {
-          Guid? Id { get; set; }
+When `namespace-from-path` is `true` (the default) **and** an output-dir is configured, the output-dir path segments are PascalCased and **appended** to the TypeSpec namespace. Files are placed flat in the output directory.
 
-          string? Name { get; set; }
+| Configuration | TypeSpec namespace | C# namespace | File path |
+| --- | --- | --- | --- |
+| `root-namespace: App` | `App.Users` | `App.Users` | `Users/User.g.cs` |
+| `root-namespace: App`, `models-output-dir: models` | `App.Users` | `App.Users.Models` | `models/User.g.cs` |
+| `root-namespace: App`, `models-output-dir: models`, `namespace-from-path: false` | `App.Users` | `App.Users` | `models/Users/User.g.cs` |
 
-          bool? Active { get; set; }
+When a model's namespace does not start with `root-namespace`, the file is placed flat at the output root while keeping its TypeSpec namespace unchanged.
 
-          DateTimeOffset? Joined { get; set; }
-      }
-  }
-  ```
+### Controllers, services, and helpers
+
+The C# namespace is always path-derived: `effectiveRootNs` + PascalCased output-dir segments, where `effectiveRootNs` is the explicit `root-namespace` or the namespace inferred from the TypeSpec namespace tree.
+
+| `root-namespace` | `controllers-output-dir` | C# namespace |
+| --- | --- | --- |
+| `MyApp` | `Controllers` (default) | `MyApp.Controllers` |
+| `MyApp` | `src/api` | `MyApp.Src.Api` |
+| _(omitted, TypeSpec ns = `Demo`)_ | `Controllers` (default) | `Demo.Controllers` |
+
+When `namespace-from-path` is `false`, controllers and services use the TypeSpec namespace of their operation container instead.
+
+---
+
+## Type mapping
+
+| TypeSpec | C# |
+| --- | --- |
+| `string` | `string` |
+| `boolean` | `bool` |
+| `bytes` | `byte[]` |
+| `int8` / `int16` / `int32` / `int64` | `sbyte` / `short` / `int` / `long` |
+| `uint8` / `uint16` / `uint32` / `uint64` | `byte` / `ushort` / `uint` / `ulong` |
+| `safeint`, `integer` | `long` |
+| `float32` | `float` |
+| `float`, `float64`, `numeric` | `double` |
+| `decimal`, `decimal128` | `decimal` |
+| `plainDate` | `DateOnly` |
+| `plainTime` | `TimeOnly` |
+| `utcDateTime`, `offsetDateTime` | `DateTimeOffset` |
+| `duration` | `TimeSpan` |
+| `url` | `Uri` |
+| `T[]` | `IList<T>` |
+| `Record<T>` | `IDictionary<string, T>` |
+| `T \| null` | `T?` |
+| Other unions, tuples | `object` |
+
+Custom scalars walk up to the nearest known base type. Unmapped scalars fall back to `object`.
+
+### `@format` overrides
+
+When a property or scalar carries `@format(...)`, the format takes precedence over the underlying type:
+
+| `@format` value | C# |
+| --- | --- |
+| `uuid`, `guid` | `Guid` |
+| `uri`, `url` | `Uri` |
+| `date-time` | `DateTimeOffset` |
+| `date` | `DateOnly` |
+| `time` | `TimeOnly` |
+
+Unknown format strings fall through to the underlying type mapping.
+
+---
+
+## Enums
+
+TypeSpec `enum` declarations are emitted as C# enums. Each member can carry a `@doc` string and a custom JSON wire name via its string value.
+
+```typespec
+@doc("Traffic light state")
+enum TrafficLight {
+  @doc("Stop")    Red: "red";
+  @doc("Caution") Yellow: "yellow";
+  @doc("Go")      Green: "green";
+}
+```
+
+```csharp
+[JsonConverter(typeof(EnumMemberConverterFactory))]
+public enum TrafficLight
+{
+    /// <summary>Stop</summary>
+    [EnumMember(Value = "red")]
+    Red,
+
+    /// <summary>Caution</summary>
+    [EnumMember(Value = "yellow")]
+    Yellow,
+
+    /// <summary>Go</summary>
+    [EnumMember(Value = "green")]
+    Green,
+}
+```
+
+The `EnumMemberConverterFactory` helper is emitted once into `helpers-output-dir` (default `Helpers/`). It implements `JsonConverterFactory` and serializes each member using the `[EnumMember(Value = "...")]` attribute; when the attribute is absent, the field name is used verbatim. Deserialization is case-insensitive.
+
+---
 
 ## Cross-namespace references
 
-When a model references a type from another namespace, the emitter adds the corresponding `using` automatically. References inside `IList<T>`, `IDictionary<string, T>`, unions, and base classes are tracked. The mapped namespace from `namespace-map` is used when generating the `using`, so consumers always see the rewritten name.
+When a model references a type from a different namespace, the corresponding `using` is added automatically. References inside `IList<T>`, `IDictionary<string, T>`, unions, and base classes are all tracked. The rewritten namespace from `namespace-map` is used in the generated `using` directive.
 
-## Output layout
-
-Given `models-output-dir: src/Models`, `interfaces-output-dir: src/Interfaces`, and `root-namespace: MyCompany.Api`:
-
-```
-emitter-output-dir/
-  src/Models/
-    Users/
-      User.cs
-      Color.cs
-  src/Interfaces/
-    Users/
-      IUser.cs
-```
-
-Models in namespaces outside the `root-namespace` prefix are placed flat at the output root, while keeping their original C# namespace in the file.
+---
 
 ## Controllers and services
 
-When the TypeSpec source includes `@typespec/http` operations, the emitter also produces ASP.NET Core controllers and matching services.
+When the TypeSpec source includes `@typespec/http` operations, the emitter produces ASP.NET Core controllers and matching services.
 
-For each HTTP `interface` (or `namespace`) that carries routes, the emitter writes three files:
+For each HTTP `interface` (or `namespace`) that carries routes, the emitter writes:
 
 | File | Content |
 | --- | --- |
-| `<Name>Controller.cs` | ASP.NET Core controller that inherits `ControllerBase`, injects `I<Name>Service`, and delegates every action to the service. |
+| `<Name>ControllerBase.cs` | Abstract ASP.NET Core controller inheriting `ControllerBase`. Injects `I<Name>Service` and delegates every action to the service. |
 | `I<Name>Service.cs` | Service interface with one `Task<T>` method per operation. |
-| `<Name>Service.cs` | Service class implementing the interface; each method throws `NotImplementedException` as a starting stub. |
+| `<Name>Service.cs` | Concrete service class; each method throws `NotImplementedException` as a starting stub. |
 
-**Routes** — one `[Route]` attribute is emitted per API version defined via `@typespec/versioning`. Without versioning there is one attribute using the TypeSpec route path.
+**Routes** — one `[Route]` attribute is emitted per API version defined via `@typespec/versioning`. Without versioning a single attribute is emitted using the TypeSpec route path.
+
+**Parameter binding** — path parameters get `[FromRoute]`, query parameters get `[FromQuery]`, headers get `[FromHeader]`, and request bodies get `[FromBody]`.
 
 ```typespec
 import "@typespec/http";
@@ -231,111 +246,87 @@ interface Users {
 }
 ```
 
-With `route-prefix: api`, the above produces `UsersController.cs`:
+With `route-prefix: api` the above produces:
 
 ```csharp
-// <auto-generated/>
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-
-namespace MyApi
+// Controllers/UsersControllerBase.cs
+[Route("/api/v1/users")]
+[Route("/api/v2/users")]
+[ApiController]
+public abstract class UsersControllerBase : ControllerBase
 {
-    [Route("/api/v1/users")]
-    [Route("/api/v2/users")]
-    [ApiController]
-    public class UsersController : ControllerBase
-    {
-        private readonly IUsersService _service;
+    private readonly IUsersService _service;
 
-        public UsersController(IUsersService service)
-        {
-            _service = service;
-        }
+    public UsersControllerBase(IUsersService service) { _service = service; }
 
-        [HttpGet]
-        public async Task<IActionResult> List()
-        {
-            return Ok(await _service.List());
-        }
+    [HttpGet]
+    public async Task<IActionResult> List() => Ok(await _service.List());
 
-        [HttpGet("{id}")]
-        public async Task<IActionResult> Read([FromRoute] string id)
-        {
-            return Ok(await _service.Read(id));
-        }
+    [HttpGet("{id}")]
+    public async Task<IActionResult> Read([FromRoute] string id) => Ok(await _service.Read(id));
 
-        [HttpPost]
-        public async Task<IActionResult> Create([FromBody] User body)
-        {
-            return Ok(await _service.Create(body));
-        }
-    }
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] User body) => Ok(await _service.Create(body));
 }
 ```
 
-And `IUsersService.cs`:
-
 ```csharp
-// <auto-generated/>
-#nullable enable
-
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-
-namespace MyApi
+// Services/IUsersService.cs
+public interface IUsersService
 {
-    public interface IUsersService
-    {
-        Task<IList<User>> List();
-
-        Task<User> Read(string id);
-
-        Task<User> Create(User body);
-    }
+    Task<IList<User>> List();
+    Task<User> Read(string id);
+    Task<User> Create(User body);
 }
 ```
 
-**Parameter binding** — path parameters get `[FromRoute]`, query parameters get `[FromQuery]`, headers get `[FromHeader]`, and request bodies get `[FromBody]`.
+---
 
 ## Custom templates
 
-Each generated artifact is rendered from a Handlebars template that ships with the emitter. Any of the four can be replaced via the `templates` option:
+Each generated artifact is rendered from a Handlebars template. Any template can be replaced via the `templates` option:
 
 ```yaml
 options:
   "@mlafleur/csharp-api-models":
     templates:
       class: ./templates/class.hbs
-      interface: ./templates/interface.hbs
-      enum: ./templates/enum.hbs
-      file: ./templates/file.hbs
+      enum-member-converter: ./templates/enum-member-converter.hbs
 ```
 
-A custom template is compiled with `noEscape: true` (so `<`, `>`, `&` pass through unchanged) and receives the view model documented below. The built-in `indent` helper prefixes each non-empty line of its argument with four spaces.
+Templates are compiled with `noEscape: true` (so `<`, `>`, and `&` pass through unchanged). The built-in `indent` helper prefixes every non-empty line of its argument with four spaces.
 
-| Template             | View model                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `file`               | `{ namespace: string, usings: string[], body: string }` — `body` is the already-rendered inner block.                                                                                                                                                                                                                                                           |
-| `class`              | `{ doc?: string, className: string, interfaceName: string, baseClass?: string, bases: string, properties: Property[], propertiesBlock: string }` — `bases` is `baseClass` and `interfaceName` joined by `, `; `propertiesBlock` is each property pre-rendered and joined by a blank line; iterate `properties` directly for finer-grained control.              |
-| `interface`          | `{ doc?: string, interfaceName: string, baseInterface?: string, baseClause: string, properties: Property[], propertiesBlock: string }` — `baseClause` is `" : <baseInterface>"` or `""`.                                                                                                                                                                        |
-| `enum`               | `{ enumName: string, members: Member[], membersBlock: string }` — `membersBlock` is each member pre-rendered with trailing commas and joined by newlines.                                                                                                                                                                                                       |
-| `controller`         | `{ doc?: string, controllerName: string, serviceName: string, serviceInterfaceName: string, routes: string[], operations: Operation[], actionsBlock: string }` — `routes` has one entry per API version; `actionsBlock` is the pre-rendered constructor-separated action blocks (4-space indented).                                                               |
-| `service-interface`  | `{ doc?: string, interfaceName: string, serviceName: string, operations: Operation[], methodsBlock: string }` — `methodsBlock` is each `Task<T>` declaration pre-rendered (4-space indented).                                                                                                                                                                    |
-| `service-class`      | `{ doc?: string, serviceName: string, interfaceName: string, operations: Operation[], methodsBlock: string }` — `methodsBlock` is each method stub pre-rendered (4-space indented).                                                                                                                                                                              |
+### View models
 
-`Property` is `{ doc?: string, type: string, name: string }`; `Member` is `{ name: string, value?: number }`. `Operation` is `{ doc?: string, name: string, httpVerb: string, routeSuffix?: string, params: Param[], returnType: string }`. `Param` is `{ name: string, type: string, binding: string, optional: boolean }`. `doc` (when present) is a fully formatted XML doc-comment block — emit it verbatim above the declaration.
+| Template | View model |
+| --- | --- |
+| `file` | `{ namespace: string, usings: string[], body: string }` — `body` is the already-rendered inner block. |
+| `class` | `{ doc?: string, className: string, interfaceName: string, baseClass?: string, bases: string, properties: Property[], propertiesBlock: string }` — `bases` is `baseClass` and `interfaceName` joined by `, `; `propertiesBlock` is the pre-rendered property list. |
+| `interface` | `{ doc?: string, interfaceName: string, baseInterface?: string, baseClause: string, properties: Property[], propertiesBlock: string }` — `baseClause` is `" : <baseInterface>"` or `""`. |
+| `enum` | `{ doc?: string, enumName: string, members: Member[], membersBlock: string }` — `membersBlock` is each member pre-rendered with trailing commas. |
+| `controller` | `{ doc?: string, controllerName: string, serviceName: string, serviceInterfaceName: string, routes: string[], operations: Operation[], actionsBlock: string }` — `routes` has one entry per API version. |
+| `service-interface` | `{ doc?: string, interfaceName: string, serviceName: string, operations: Operation[], methodsBlock: string }` |
+| `service-class` | `{ doc?: string, serviceName: string, interfaceName: string, operations: Operation[], methodsBlock: string }` |
+| `merge-patch-value` | _(no variables — static helper class)_ |
+| `enum-member-converter` | _(no variables — static helper class)_ |
+
+**Shared sub-types:**
+
+- `Property` — `{ doc?: string, type: string, name: string }`
+- `Member` — `{ doc?: string, name: string, memberValue: string, value?: number }`
+- `Operation` — `{ doc?: string, name: string, httpVerb: string, routeSuffix?: string, params: Param[], returnType: string }`
+- `Param` — `{ name: string, type: string, binding: string, optional: boolean }`
+
+`doc`, when present, is a fully formatted XML doc-comment block — emit it verbatim above the declaration.
+
+---
 
 ## Develop
 
 ```bash
 npm install
-npm run build      # tsc src/ + tsc test/
-npm test           # node --test on dist/
-npm run format     # prettier
-npm run lint       # eslint
+npm run build   # tsc src/ + tsc test/ + copy templates
+npm test        # node --test on dist/
+npm run format  # prettier
+npm run lint    # eslint
 ```

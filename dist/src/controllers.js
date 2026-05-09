@@ -1,7 +1,18 @@
+/**
+ * @module controllers
+ *
+ * Collects HTTP service operations from a compiled TypeSpec program and
+ * organises them into {@link ControllerGroup} records, each of which describes
+ * one controller / service pair ready for template rendering.
+ *
+ * The main export is {@link collectControllers}, called by the emitter after
+ * all models and enums have been processed.
+ */
 import { getDoc, getFormat, isArrayModelType, isRecordModelType, } from "@typespec/compiler";
 import { getAllHttpServices, getRoutePath, } from "@typespec/http";
 import { getAllVersions } from "@typespec/versioning";
 import { renderDocComment, } from "./renderer.js";
+/** Maps TypeSpec `@format` values to their C# type equivalents. */
 const FORMAT_MAP = {
     uuid: "Guid",
     guid: "Guid",
@@ -11,6 +22,7 @@ const FORMAT_MAP = {
     date: "DateOnly",
     time: "TimeOnly",
 };
+/** Maps TypeSpec built-in scalar names to their C# primitive equivalents. */
 const SCALAR_MAP = {
     string: "string",
     boolean: "bool",
@@ -38,6 +50,20 @@ const SCALAR_MAP = {
     duration: "TimeSpan",
     url: "Uri",
 };
+/**
+ * Walks all HTTP services in the compiled TypeSpec program and returns one
+ * {@link ControllerGroup} per logical operation container (TypeSpec Interface
+ * or Namespace).
+ *
+ * @param program - The compiled TypeSpec program.
+ * @param options - Routing and naming options forwarded from the emitter.
+ * @param resolveNamespace - Callback that converts a TypeSpec Namespace node to
+ *   a C# namespace string.
+ * @param toFolderSegments - Callback that converts a C# namespace string to the
+ *   relative folder path segments used when writing files.
+ * @returns Array of controller groups, empty if any HTTP diagnostic errors are
+ *   present in the program.
+ */
 export function collectControllers(program, options, resolveNamespace, toFolderSegments) {
     const [services, diagnostics] = getAllHttpServices(program);
     if (diagnostics.length > 0)
@@ -64,15 +90,13 @@ export function collectControllers(program, options, resolveNamespace, toFolderS
             const serviceName = `${pascalCase(containerName)}Service${options.abstractSuffix}`;
             const serviceInterfaceName = `I${pascalCase(containerName)}Service`;
             const basePath = resolveControllerPath(program, ops);
-            const routes = buildRoutes(options.routePrefix, basePath, versionValues);
-            const operations = ops.map((op) => buildOperationView(program, op, options));
+            const operations = ops.map((op) => buildOperationView(program, op, options, basePath, versionValues));
             groups.push({
                 controllerView: {
                     doc: doc ? renderDocComment(doc) : undefined,
                     controllerName,
                     serviceName,
                     serviceInterfaceName,
-                    routes,
                     operations,
                 },
                 serviceView: {
@@ -89,6 +113,17 @@ export function collectControllers(program, options, resolveNamespace, toFolderS
     }
     return groups;
 }
+/**
+ * Determines the shared base path for a group of operations belonging to the
+ * same controller.
+ *
+ * Strips the operation-specific route suffix from the first operation's full
+ * path to recover the controller-level segment.
+ *
+ * @param program - The compiled TypeSpec program (used to read `@route`).
+ * @param ops - All HTTP operations for one container, at least one element.
+ * @returns Base path string (always starts with `/`).
+ */
 function resolveControllerPath(program, ops) {
     if (ops.length === 0)
         return "";
@@ -103,33 +138,73 @@ function resolveControllerPath(program, ops) {
     }
     return firstOp.path;
 }
-function buildRoutes(prefix, basePath, versions) {
+/**
+ * Builds the absolute route strings for a single operation.
+ *
+ * One route is emitted per API version; a single unversioned route is emitted
+ * when the service has no `@versioned` decorator.  The route suffix (from the
+ * operation's own `@route` decorator) is appended after the base path.
+ *
+ * @param prefix - Route prefix (e.g. `"api"`), may be empty.
+ * @param basePath - Controller base path (e.g. `"/widgets"`).
+ * @param routeSuffix - Operation-level route fragment (e.g. `"{id}"`), or
+ *   `undefined` when the operation sits at the container root.
+ * @param versions - Version value strings from `@versioned(Versions)`.
+ * @returns Array of absolute route strings starting with `/`.
+ */
+function buildOperationRoutes(prefix, basePath, routeSuffix, versions) {
     const trimmedBase = basePath.replace(/^\//, "");
     const trimmedPrefix = prefix.replace(/^\/|\/$/g, "");
+    const trimmedSuffix = routeSuffix?.replace(/^\//, "");
     if (versions.length === 0) {
-        const parts = [trimmedPrefix, trimmedBase].filter(Boolean);
+        const parts = [trimmedPrefix, trimmedBase, trimmedSuffix].filter(Boolean);
         return ["/" + parts.join("/")];
     }
     return versions.map((v) => {
-        const parts = [trimmedPrefix, v, trimmedBase].filter(Boolean);
+        const parts = [trimmedPrefix, v, trimmedBase, trimmedSuffix].filter(Boolean);
         return "/" + parts.join("/");
     });
 }
-function buildOperationView(program, op, options) {
+/**
+ * Converts a single {@link HttpOperation} into an {@link OperationView} that
+ * the renderer can consume.
+ *
+ * @param program - The compiled TypeSpec program.
+ * @param op - The HTTP operation to convert.
+ * @param options - Naming, routing, and nullability options.
+ * @param basePath - The controller-level base path (e.g. `"/users"`), used
+ *   together with the operation's own route suffix to build full route strings.
+ * @param versions - Version value strings from `@versioned(Versions)`; empty
+ *   when the service is unversioned.
+ * @returns Populated operation view model.
+ */
+function buildOperationView(program, op, options, basePath, versions) {
     const opRoute = getRoutePath(program, op.operation)?.path;
     const routeSuffix = opRoute && opRoute !== "/" ? opRoute.replace(/^\//, "") : undefined;
     const doc = getDoc(program, op.operation);
     const params = buildParams(program, op.parameters.parameters, op.parameters.body, options);
     const returnType = resolveReturnType(program, op, options);
+    const routes = buildOperationRoutes(options.routePrefix, basePath, routeSuffix, versions);
     return {
         doc: doc ? renderDocComment(doc) : undefined,
         name: pascalCase(op.operation.name),
         httpVerb: pascalCase(op.verb),
+        routes,
         routeSuffix,
         params,
         returnType,
     };
 }
+/**
+ * Builds the parameter list for an operation, combining path/query/header
+ * parameters with the optional request body.
+ *
+ * @param program - The compiled TypeSpec program.
+ * @param parameters - Typed HTTP parameter list (path, query, header).
+ * @param body - Optional request body descriptor.
+ * @param options - Nullability options.
+ * @returns Ordered array of parameter view models (body always last if present).
+ */
 function buildParams(program, parameters, body, options) {
     const result = [];
     for (const param of parameters) {
@@ -154,6 +229,13 @@ function buildParams(program, parameters, body, options) {
     }
     return result;
 }
+/**
+ * Maps a TypeSpec HTTP parameter location to the corresponding ASP.NET Core
+ * binding attribute name.
+ *
+ * @param location - TypeSpec HTTP parameter type string.
+ * @returns Binding attribute name, or `undefined` for unsupported locations.
+ */
 function httpParamBinding(location) {
     switch (location) {
         case "path":
@@ -166,6 +248,17 @@ function httpParamBinding(location) {
             return undefined;
     }
 }
+/**
+ * Determines the C# return type for an HTTP operation by inspecting the first
+ * 2xx response body type.
+ *
+ * Falls back to `"object"` when no successful response has a typed body.
+ *
+ * @param program - The compiled TypeSpec program.
+ * @param op - The HTTP operation to inspect.
+ * @param options - Nullability and type-resolution options.
+ * @returns C# type string for the service method's return type.
+ */
 function resolveReturnType(program, op, options) {
     for (const response of op.responses) {
         const code = response.statusCodes;
@@ -182,6 +275,15 @@ function resolveReturnType(program, op, options) {
     }
     return "object";
 }
+/**
+ * Resolves the C# type for a model property, taking `@format` annotations into
+ * account before falling back to the raw type resolution.
+ *
+ * @param program - The compiled TypeSpec program.
+ * @param prop - The model property to resolve.
+ * @param options - Options (currently unused here but kept for consistency).
+ * @returns C# type string.
+ */
 function propTypeRef(program, prop, options) {
     const propFormat = getFormat(program, prop);
     const scalarFormat = prop.type.kind === "Scalar" ? getFormat(program, prop.type) : undefined;
@@ -191,6 +293,18 @@ function propTypeRef(program, prop, options) {
     }
     return typeRef(program, prop.type, options);
 }
+/**
+ * Recursively resolves the C# type string for any TypeSpec {@link Type} node.
+ *
+ * Handles scalars (via {@link SCALAR_MAP} and {@link FORMAT_MAP}), arrays,
+ * records, enums, booleans, strings, numbers, nullable unions, and falls back
+ * to `"object"` for unsupported kinds.
+ *
+ * @param program - The compiled TypeSpec program (used for `@format` lookup).
+ * @param type - The TypeSpec type node to resolve.
+ * @param options - Options (currently unused; kept for future extensibility).
+ * @returns C# type string.
+ */
 function typeRef(program, type, options) {
     switch (type.kind) {
         case "Scalar": {
@@ -237,6 +351,12 @@ function typeRef(program, type, options) {
             return "object";
     }
 }
+/**
+ * Converts a string to PascalCase by splitting on `_`, `-`, and whitespace.
+ *
+ * @param name - Input string.
+ * @returns PascalCase string.
+ */
 function pascalCase(name) {
     if (!name)
         return name;
@@ -245,6 +365,13 @@ function pascalCase(name) {
         .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : ""))
         .join("");
 }
+/**
+ * Converts a string to camelCase by PascalCasing it then lowercasing the first
+ * character.
+ *
+ * @param name - Input string.
+ * @returns camelCase string.
+ */
 function camelCase(name) {
     const pascal = pascalCase(name);
     return pascal ? pascal[0].toLowerCase() + pascal.slice(1) : pascal;
