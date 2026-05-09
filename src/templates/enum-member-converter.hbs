@@ -46,7 +46,7 @@
       var valid = string.Join(", ", _readMap.Keys.Select(k => $"\"{k}\""));
       throw new JsonException($"Unknown value '{s}' for {typeof(T).Name}. Valid values: {valid}.");
 --}}
-i/// <summary>
+/// <summary>
 /// Creates <see cref="EnumMemberConverter{T}"/> instances for any enum type at runtime.
 /// </summary>
 internal sealed class EnumMemberConverterFactory : JsonConverterFactory
